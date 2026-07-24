@@ -4,13 +4,22 @@
 
 // ---------- Local storage (all game state lives here) ----------
 const STORAGE_KEYS = {
+  playerName: "playerName",
   coins: "coins",
   highScore: "highScore",
   unlockedSkins: "unlockedSkins",
   currentSkin: "currentSkin"
+  
 };
 
 const LocalState = {
+  
+  getPlayerName() {
+  return localStorage.getItem(STORAGE_KEYS.playerName) || "";
+  },
+  setPlayerName(name) {
+  localStorage.setItem(STORAGE_KEYS.playerName, name);
+  },
   getCoins() {
     return Number(localStorage.getItem(STORAGE_KEYS.coins)) || 0;
   },
