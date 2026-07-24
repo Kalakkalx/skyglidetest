@@ -468,13 +468,6 @@ const Game = {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
 
-    // Sky gradient matching the background art's misty blue tones
-    const sky = ctx.createLinearGradient(0, 0, 0, this.height);
-    sky.addColorStop(0, "#3f8fd6");
-    sky.addColorStop(1, "#bfe8f5");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, this.width, this.height);
-
     // Pipes
     for (const pipe of this.pipes) {
       const topHeight = pipe.gapCenter - this.pipeGapY / 2;
