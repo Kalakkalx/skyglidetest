@@ -1,0 +1,291 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #111;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------- 16:9 game frame, letterboxed ---------- */
+.game-frame {
+  position: relative;
+  width: 100vw;
+  height: 56.25vw; /* 16:9 */
+  max-height: 100vh;
+  max-width: 177.78vh; /* 16:9 */
+  background: #000;
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(0,0,0,0.6);
+}
+
+.bg-image {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+/* ---------- Screen visibility ---------- */
+.screen {
+  display: none;
+  width: 100%;
+  height: 100%;
+}
+.screen.active {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------- Buttons ---------- */
+.menu-btn {
+  font-size: 1.4vw;
+  padding: 1vh 3vw;
+  margin: 0.6vh 0;
+  border: none;
+  border-radius: 8px;
+  background: #ffcc00;
+  color: #222;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.2s ease;
+  touch-action: manipulation;
+  user-select: none;
+}
+.menu-btn:hover { transform: scale(1.05); background: #ffd633; }
+.menu-btn:active { transform: scale(0.97); }
+.menu-btn.small { font-size: 1vw; padding: 0.8vh 2vw; }
+
+/* ---------- Opening screen ---------- */
+.opening-overlay {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1vh;
+}
+.menu-options {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ---------- Skins screen ---------- */
+.skins-overlay {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2vh 2vw;
+  color: white;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+}
+.skins-overlay h2 { font-size: 2vw; margin-bottom: 1vh; }
+.coin-display { font-size: 1.2vw; margin-bottom: 1.5vh; }
+
+.skins-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5vw;
+  width: 80%;
+  overflow-y: auto;
+  flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
+.skin-card {
+  background: rgba(0,0,0,0.4);
+  border-radius: 10px;
+  padding: 1vh;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5vh;
+}
+.skin-card img {
+  width: 60%;
+  aspect-ratio: 1;
+  object-fit: contain;
+}
+.skin-card.locked img { filter: grayscale(1) brightness(0.7) opacity(0.3); }
+.skin-card .skin-name { font-size: 0.9vw; }
+.skin-card .skin-tier { font-size: 0.7vw; opacity: 0.8; }
+.unlock-btn {
+  font-size: 0.8vw;
+  padding: 0.5vh 1vw;
+  border: none;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+  background: #888;
+  color: #eee;
+  touch-action: manipulation;
+}
+.unlock-btn.affordable { background: #2ecc71; color: #063; cursor: pointer; }
+.unlock-btn.equipped { background: #ffcc00; color: #222; }
+.unlock-btn:disabled { cursor: not-allowed; }
+
+/* ---------- Game screen ---------- */
+#screen-game .game-frame { background: #70c5ce; }
+#game-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none; /* prevent scroll/zoom gestures from eating taps */
+}
+.hud {
+  position: absolute;
+  top: 2vh;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 2;
+  pointer-events: none;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.7);
+}
+#hud-score {
+  font-size: 4vw;
+  color: white;
+  font-weight: 900;
+}
+
+/* ---------- Pause ---------- */
+.pause-btn {
+  position: absolute;
+  top: 2vh;
+  right: 3vw;
+  z-index: 3;
+  width: 6vh;
+  height: 6vh;
+  min-width: 40px;
+  min-height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: white;
+  font-size: 1.6vh;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.pause-btn:hover { background: rgba(0, 0, 0, 0.65); }
+.pause-btn:active { transform: scale(0.94); }
+
+.pause-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pause-overlay.hidden { display: none; }
+.pause-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8vh;
+  color: white;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+}
+.pause-panel h2 { font-size: 2.4vw; letter-spacing: 0.1em; margin-bottom: 0.6vh; }
+
+/* ---------- Game over screen ---------- */
+.gameover-overlay {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+  gap: 1vh;
+}
+.gameover-overlay h2 { font-size: 2.2vw; }
+.stats-row {
+  display: flex;
+  gap: 3vw;
+  margin: 1vh 0;
+}
+.stat { display: flex; flex-direction: column; align-items: center; }
+.stat-label { font-size: 0.9vw; opacity: 0.85; }
+.stat-value { font-size: 1.8vw; font-weight: bold; }
+
+.gameover-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 1vh;
+}
+
+@media (max-width: 700px) {
+  /* True full-screen on mobile — no letterboxed 16:9 frame, the game
+     fills the whole viewport below the browser's address bar, same as
+     the flappybird.io screenshots. Desktop keeps the letterboxed look. */
+  #app {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+  .game-frame {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh; /* dynamic viewport height — accounts for mobile browser chrome showing/hiding */
+    max-width: none;
+    max-height: none;
+    box-shadow: none;
+  }
+
+  .menu-btn, .skins-overlay h2, .coin-display,
+  .stat-label, .stat-value, .gameover-overlay h2, .pause-panel h2,
+  .skin-card .skin-name, .skin-card .skin-tier, .unlock-btn {
+    font-size: revert;
+  }
+  .menu-btn { padding: 1.6vh 6vw; font-size: 4.2vw; }
+  .menu-btn.small { font-size: 3.4vw; padding: 1.2vh 4vw; }
+  .skins-overlay h2, .gameover-overlay h2, .pause-panel h2 { font-size: 6vw; }
+  .coin-display { font-size: 4vw; }
+  .skins-grid { grid-template-columns: repeat(3, 1fr); width: 92%; }
+  .skin-card .skin-name { font-size: 3vw; }
+  .skin-card .skin-tier { font-size: 2.4vw; }
+  .unlock-btn { font-size: 2.6vw; padding: 0.8vh 2.5vw; }
+  .stat-label { font-size: 3vw; }
+  .stat-value { font-size: 5.5vw; }
+  #hud-score { font-size: 10vw; }
+}

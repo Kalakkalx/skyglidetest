@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Flappy Game</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ OPENING SCREEN ============ -->
+  <div id="screen-opening" class="screen active">
+    <div class="game-frame">
+      <img class="bg-image" src="images/Background.png" alt="background" />
+      <div class="opening-overlay">
+        <div class="menu-options">
+          <button id="btn-play" class="menu-btn">PLAY</button>
+          <button id="btn-skins" class="menu-btn">SKINS</button>
+          <button id="btn-leaderboard" class="menu-btn">LEADERBOARD</button>
+          <button id="btn-exit" class="menu-btn">EXIT</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SKINS SCREEN ============ -->
+  <div id="screen-skins" class="screen">
+    <div class="game-frame">
+      <img class="bg-image" src="images/Background.png" alt="background" />
+      <div class="skins-overlay">
+        <h2>SKINS</h2>
+        <div class="coin-display">Coins: <span id="skins-coin-count">0</span></div>
+        <div id="skins-grid" class="skins-grid"></div>
+        <button id="btn-skins-back" class="menu-btn small">BACK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GAME SCREEN ============ -->
+  <div id="screen-game" class="screen">
+    <div class="game-frame">
+      <canvas id="game-canvas"></canvas>
+      <div class="hud">
+        <div id="hud-score">0</div>
+      </div>
+      <button id="btn-pause" class="pause-btn" aria-label="Pause">&#10074;&#10074;</button>
+
+      <!-- Shown only while paused, sits on top of the frozen canvas -->
+      <div id="pause-overlay" class="pause-overlay hidden">
+        <div class="pause-panel">
+          <h2>PAUSED</h2>
+          <button id="btn-resume" class="menu-btn">RESUME</button>
+          <button id="btn-pause-quit" class="menu-btn small">QUIT TO MENU</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GAME OVER SCREEN ============ -->
+  <div id="screen-gameover" class="screen">
+    <div class="game-frame">
+      <img class="bg-image" src="images/Background.png" alt="background" />
+      <div class="gameover-overlay">
+        <h2>GAME OVER</h2>
+
+        <div class="stats-row">
+          <div class="stat"><span class="stat-label">Coins</span><span id="go-coins" class="stat-value">0</span></div>
+          <div class="stat"><span class="stat-label">Score</span><span id="go-score" class="stat-value">0</span></div>
+          <div class="stat"><span class="stat-label">HighScore</span><span id="go-highscore" class="stat-value">0</span></div>
+        </div>
+
+        <!-- Shown only when the run's score qualifies for the Top 20 -->
+        <div id="leaderboard-prompt" class="leaderboard-prompt hidden">
+          <div class="leaderboard-prompt-text">New High Score! Enter your name (3&ndash;10 chars):</div>
+          <div class="leaderboard-prompt-row">
+            <input type="text" id="leaderboard-name-input" class="leaderboard-name-input"
+                   maxlength="10" placeholder="Your name" autocomplete="off" />
+            <button id="btn-leaderboard-save" class="menu-btn small">SAVE</button>
+          </div>
+          <div id="leaderboard-prompt-error" class="leaderboard-prompt-error"></div>
+        </div>
+        <div id="leaderboard-saved-msg" class="leaderboard-saved-msg hidden"></div>
+
+        <div class="gameover-menu">
+          <button id="btn-retry" class="menu-btn">RETRY</button>
+          <button id="btn-change-skin" class="menu-btn">SKINS</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LEADERBOARD SCREEN ============ -->
+  <div id="screen-leaderboard" class="screen">
+    <div class="game-frame">
+      <img class="bg-image" src="images/Background.png" alt="background" />
+      <div class="leaderboard-overlay">
+        <h2>TOP 20</h2>
+        <div class="leaderboard-table-wrap">
+          <table class="leaderboard-table">
+            <thead>
+              <tr><th>Rank</th><th>Name</th><th>Score</th></tr>
+            </thead>
+            <tbody id="leaderboard-body">
+              <tr><td colspan="3">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <button id="btn-leaderboard-back" class="menu-btn small">BACK</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<audio id="sfx-point" src="sound/sound1.mp3" preload="auto"></audio>
+<audio id="sfx-tap" src="sound/sound2.mp3" preload="auto"></audio>
+<audio id="sfx-gameover" src="sound/GAMEOVER.mp3" preload="auto"></audio>
+
+<!-- Firebase (compat build — no bundler needed, matches the rest of this
+     plain-JS project). Only app + firestore are loaded; no auth SDK since
+     the leaderboard is intentionally login-free. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
