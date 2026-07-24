@@ -6,16 +6,15 @@
 }
 
 body {
-  background-color: #111; /* Dark backdrop for desktop margins */
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  color: #fff;
-  height: 100dvh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  touch-action: none; /* Disables pull-to-refresh & pinch zoom */
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
+    margin: 0;
+    overflow: hidden;
+    background: url("images/Background.png") center center / cover no-repeat;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #fff;
+    height: 100dvh;
+    touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 /* ============ APP CONTAINER ============ */
