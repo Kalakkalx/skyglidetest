@@ -26,8 +26,11 @@ const UI = {
 
   renderSkinsGrid() {
     const grid = document.getElementById("skins-grid");
+    if (!grid) return;
     grid.innerHTML = "";
-    document.getElementById("skins-coin-count").textContent = LocalState.getCoins();
+    
+    const coinCountEl = document.getElementById("skins-coin-count");
+    if (coinCountEl) coinCountEl.textContent = LocalState.getCoins();
 
     const unlocked = LocalState.getUnlockedSkins();
     const current = LocalState.getCurrentSkin();
@@ -93,19 +96,18 @@ const UI = {
   startGame() {
     this.showScreen("screen-game");
 
-    document.getElementById("hud-score").textContent = "0";
+    const hudScore = document.getElementById("hud-score");
+    if (hudScore) hudScore.textContent = "0";
 
     Game.onScoreUpdate = (score) => {
-      document.getElementById("hud-score").textContent = score;
+      if (hudScore) hudScore.textContent = score;
     };
 
     Game.onGameOver = (finalScore, coinsEarned) => this.handleGameOver(finalScore, coinsEarned);
 
     const canvas = document.getElementById("game-canvas");
-    if (!Game.canvas) {
+    if (!Game.canvas && canvas) {
       Game.init(canvas);
-      // pointerdown unifies mouse clicks (laptop) and taps (phone/tablet)
-      // in a single listener with no extra input lag.
       canvas.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         if (Game.paused) return;
@@ -118,24 +120,28 @@ const UI = {
   // ---------- Pause ----------
   pauseGame() {
     Game.pause();
-    document.getElementById("pause-overlay").classList.remove("hidden");
+    const overlay = document.getElementById("pause-overlay");
+    if (overlay) overlay.classList.remove("hidden");
   },
 
   resumeGame() {
-    document.getElementById("pause-overlay").classList.add("hidden");
+    const overlay = document.getElementById("pause-overlay");
+    if (overlay) overlay.classList.add("hidden");
     Game.resume();
   },
 
   quitToMenuFromPause() {
-    Game.running = false;   // fully stop the run — no score/coins are awarded on a quit
+    Game.running = false;   
     Game.paused = false;
-    document.getElementById("pause-overlay").classList.add("hidden");
+    const overlay = document.getElementById("pause-overlay");
+    if (overlay) overlay.classList.add("hidden");
     this.goToOpening();
   },
 
   // ---------- Game over screen ----------
   async handleGameOver(finalScore, coinsEarnedThisRun) {
-    document.getElementById("go-score").textContent = finalScore;
+    const goScore = document.getElementById("go-score");
+    if (goScore) goScore.textContent = finalScore;
 
     const coins = LocalState.getCoins() + coinsEarnedThisRun;
     LocalState.setCoins(coins);
@@ -148,8 +154,11 @@ const UI = {
     
     const highScore = LocalState.getHighScore();
 
-    document.getElementById("go-coins").textContent = coins;
-    document.getElementById("go-highscore").textContent = highScore;
+    const goCoins = document.getElementById("go-coins");
+    if (goCoins) goCoins.textContent = coins;
+    
+    const goHighscore = document.getElementById("go-highscore");
+    if (goHighscore) goHighscore.textContent = highScore;
 
     this._resetLeaderboardPromptUI();
     this.showScreen("screen-gameover");
@@ -170,10 +179,13 @@ const UI = {
             const result = await saveLeaderboardEntry(savedName, finalScore);
 
             const msg = document.getElementById("leaderboard-saved-msg");
-            msg.textContent = result.rank 
-                ? `Saved! You're rank #${result.rank} on the Top 20.` 
-                : "Saved to the leaderboard!";
-            msg.classList.remove("hidden");
+            if (msg) {
+                msg.textContent = result.rank 
+                    ? `Saved! You're rank #${result.rank} on the Top 20.` 
+                    : "Saved to the leaderboard!";
+                msg.classList.remove("hidden");
+                msg.style.display = ""; // Ensure it's visible
+            }
           } else {
             // First time qualifying, ask for name
             this._showLeaderboardPrompt();
@@ -187,54 +199,92 @@ const UI = {
 
   // ---------- Leaderboard ----------
   _resetLeaderboardPromptUI() {
-    document.getElementById("leaderboard-prompt").classList.add("hidden");
-    document.getElementById("leaderboard-saved-msg").classList.add("hidden");
-    document.getElementById("leaderboard-name-input").value = "";
-    document.getElementById("leaderboard-prompt-error").textContent = "";
+    // Forcefully hide elements by their exact IDs to prevent layout bugs
+    const prompt = document.getElementById("leaderboard-prompt");
+    if (prompt) { prompt.classList.add("hidden"); prompt.style.display = "none"; }
+
+    const msg = document.getElementById("leaderboard-saved-msg");
+    if (msg) { msg.classList.add("hidden"); msg.style.display = "none"; }
+
+    const input = document.getElementById("leaderboard-name-input");
+    if (input) { 
+        input.classList.add("hidden"); 
+        input.style.display = "none"; 
+        input.value = ""; 
+    }
+
+    const btn = document.getElementById("btn-leaderboard-save");
+    if (btn) { btn.classList.add("hidden"); btn.style.display = "none"; }
+
+    const errorEl = document.getElementById("leaderboard-prompt-error");
+    if (errorEl) { errorEl.textContent = ""; }
   },
 
   _showLeaderboardPrompt() {
-    document.getElementById("leaderboard-prompt").classList.remove("hidden");
-    document.getElementById("leaderboard-name-input").focus();
+    const prompt = document.getElementById("leaderboard-prompt");
+    if (prompt) { prompt.classList.remove("hidden"); prompt.style.display = ""; }
+
+    const input = document.getElementById("leaderboard-name-input");
+    if (input) { 
+        input.classList.remove("hidden"); 
+        input.style.display = ""; 
+        input.focus(); 
+    }
+
+    const btn = document.getElementById("btn-leaderboard-save");
+    if (btn) { btn.classList.remove("hidden"); btn.style.display = ""; }
   },
 
   async submitLeaderboardName() {
     const saveBtn = document.getElementById("btn-leaderboard-save");
     
-    // PREVENT DOUBLE SUBMISSIONS (if button is already disabled, do nothing)
-    if (saveBtn.disabled) return; 
+    // PREVENT DOUBLE SUBMISSIONS 
+    if (saveBtn && saveBtn.disabled) return; 
 
     const input = document.getElementById("leaderboard-name-input");
     const errorEl = document.getElementById("leaderboard-prompt-error");
-    const name = input.value.trim();
+    const name = input ? input.value.trim() : "";
 
-    errorEl.textContent = "";
+    if (errorEl) errorEl.textContent = "";
 
     if (name.length < 3 || name.length > 10) {
-      errorEl.textContent = "Name must be 3–10 characters.";
+      if (errorEl) errorEl.textContent = "Name must be 3–10 characters.";
       return;
     }
 
     LocalState.setPlayerName(name);
 
-    saveBtn.disabled = true;
-    saveBtn.textContent = "...";
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "...";
+    }
 
     try {
       const result = await saveLeaderboardEntry(name, this._pendingLeaderboardScore);
 
-      document.getElementById("leaderboard-prompt").classList.add("hidden");
+      // Explicitly hide inputs upon success
+      const prompt = document.getElementById("leaderboard-prompt");
+      if (prompt) { prompt.classList.add("hidden"); prompt.style.display = "none"; }
+
+      if (input) { input.classList.add("hidden"); input.style.display = "none"; }
+      if (saveBtn) { saveBtn.classList.add("hidden"); saveBtn.style.display = "none"; }
+
       const msg = document.getElementById("leaderboard-saved-msg");
-      msg.textContent = (result && result.rank)
-        ? `Saved! You're rank #${result.rank} on the Top 20.`
-        : "Saved to the leaderboard!";
-      msg.classList.remove("hidden");
+      if (msg) {
+        msg.textContent = (result && result.rank)
+          ? `Saved! You're rank #${result.rank} on the Top 20.`
+          : "Saved to the leaderboard!";
+        msg.classList.remove("hidden");
+        msg.style.display = "";
+      }
     } catch (err) {
       console.error("Failed to save leaderboard entry:", err);
-      errorEl.textContent = "Couldn't save right now. Please try again.";
+      if (errorEl) errorEl.textContent = "Couldn't save right now. Please try again.";
     } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = "SAVE";
+      if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = "SAVE";
+      }
     }
   },
 
@@ -242,6 +292,8 @@ const UI = {
     this.showScreen("screen-leaderboard");
 
     const tbody = document.getElementById("leaderboard-body");
+    if (!tbody) return;
+    
     tbody.innerHTML = "<tr><td colspan='3'>Loading...</td></tr>";
 
     try {
@@ -279,38 +331,44 @@ const UI = {
 
 // ---------- Event wiring ----------
 document.addEventListener("DOMContentLoaded", () => {
+  const safeBind = (id, event, callback) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener(event, callback);
+  };
 
   // Opening screen
-  document.getElementById("btn-play").addEventListener("click", () => UI.startGame());
-  document.getElementById("btn-skins").addEventListener("click", () => UI.goToSkins("screen-opening"));
-  document.getElementById("btn-leaderboard").addEventListener("click", () => UI.goToLeaderboard());
-  document.getElementById("btn-exit").addEventListener("click", () => {
+  safeBind("btn-play", "click", () => UI.startGame());
+  safeBind("btn-skins", "click", () => UI.goToSkins("screen-opening"));
+  safeBind("btn-leaderboard", "click", () => UI.goToLeaderboard());
+  safeBind("btn-exit", "click", () => {
     if (confirm("Exit the game?")) {
       window.close();
-      // Most browsers block scripts from closing a tab they didn't open —
-      // if we're still here a moment later, let the player know what to do.
       setTimeout(() => alert("You can close this tab now. Thanks for playing!"), 200);
     }
   });
 
   // Skins screen
-  document.getElementById("btn-skins-back").addEventListener("click", () => UI.showScreen(UI.skinsReturnTo));
+  safeBind("btn-skins-back", "click", () => UI.showScreen(UI.skinsReturnTo));
 
   // Game screen (pause)
-  document.getElementById("btn-pause").addEventListener("click", () => UI.pauseGame());
-  document.getElementById("btn-resume").addEventListener("click", () => UI.resumeGame());
-  document.getElementById("btn-pause-quit").addEventListener("click", () => UI.quitToMenuFromPause());
+  safeBind("btn-pause", "click", () => UI.pauseGame());
+  safeBind("btn-resume", "click", () => UI.resumeGame());
+  safeBind("btn-pause-quit", "click", () => UI.quitToMenuFromPause());
 
   // Game over screen
-  document.getElementById("btn-retry").addEventListener("click", () => UI.startGame());
-  document.getElementById("btn-change-skin").addEventListener("click", () => UI.goToSkins("screen-gameover"));
-  document.getElementById("btn-leaderboard-save").addEventListener("click", () => UI.submitLeaderboardName());
-  document.getElementById("leaderboard-name-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") UI.submitLeaderboardName();
-  });
+  safeBind("btn-retry", "click", () => UI.startGame());
+  safeBind("btn-change-skin", "click", () => UI.goToSkins("screen-gameover"));
+  safeBind("btn-leaderboard-save", "click", () => UI.submitLeaderboardName());
+  
+  const nameInput = document.getElementById("leaderboard-name-input");
+  if (nameInput) {
+      nameInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") UI.submitLeaderboardName();
+      });
+  }
 
   // Leaderboard screen
-  document.getElementById("btn-leaderboard-back").addEventListener("click", () => UI.goToOpening());
+  safeBind("btn-leaderboard-back", "click", () => UI.goToOpening());
 
   UI.goToOpening();
 });
