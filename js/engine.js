@@ -84,6 +84,10 @@ function equipSkin(level) {
 }
 
 // ---------- Leaderboard (Firebase Firestore, no login) ----------
+// The whole Top 20 lives in a single document so reads/sorts/truncation
+// are all one round trip — no composite queries, no auth required. Write
+// access is restricted to this one document path via Firestore security
+// rules (see firestore.rules), not via any login flow.
 const firebaseConfig = {
   apiKey: "AIzaSyDQHGHt9XeQ0HG70vfC0fu-qT5VtsISKFY",
   authDomain: "hollowboat1.firebaseapp.com",
@@ -100,6 +104,8 @@ const firestoreDb = firebase.firestore();
 const LEADERBOARD_MAX = 20;
 const leaderboardDocRef = firestoreDb.collection("leaderboard").doc("top20");
 
+// Returns the current Top 20 as [{name, score}, ...] sorted highest first.
+// Empty array if the leaderboard doesn't exist yet (first-ever score).
 async function fetchLeaderboard() {
   const snap = await leaderboardDocRef.get();
   if (!snap.exists) return [];
@@ -107,34 +113,44 @@ async function fetchLeaderboard() {
   return Array.isArray(data.entries) ? data.entries : [];
 }
 
+// Silent check — fetches the current list and compares against the lowest
+// qualifying score. Always eligible if the board isn't full yet.
 async function checkLeaderboardEligibility(score) {
   const entries = await fetchLeaderboard();
   if (entries.length < LEADERBOARD_MAX) return true;
-  const lowestScore = entries[entries.length - 1].score;
+  const lowestScore = entries[entries.length - 1].score; // entries are kept sorted descending
   return score > lowestScore;
 }
 
+// Re-fetches fresh, checks if the player already exists, updates their score 
+// only if it's higher, sorts descending, and keeps only the top 20.
 async function saveLeaderboardEntry(name, score) {
   const entries = await fetchLeaderboard();
 
+  // 1. Check if this player is already on the leaderboard
   const existingIndex = entries.findIndex(e => e.name === name);
   
   if (existingIndex >= 0) {
+    // Player exists! Only update them if this is a new high score
     if (score > entries[existingIndex].score) {
       entries[existingIndex].score = score;
-      entries[existingIndex]._t = Date.now();
+      entries[existingIndex]._t = Date.now(); // update tiebreaker time
     }
   } else {
+    // 2. Player is new, add them to the array
     entries.push({ name, score, _t: Date.now() });
   }
 
+  // 3. Sort descending
   entries.sort((a, b) => b.score - a.score || (a._t || 0) - (b._t || 0));
 
+  // 4. Trim to Top 20 and find their new rank
   const trimmedWithTiebreaker = entries.slice(0, LEADERBOARD_MAX);
-  const rankIndex = trimmedWithTiebreaker.findIndex(e => e.name === name);
+  const rankIndex = trimmedWithTiebreaker.findIndex(e => e.name === name); // match by name now
   
   const trimmed = trimmedWithTiebreaker.map(({ name, score }) => ({ name, score }));
 
+  // 5. Save back to Firestore
   await leaderboardDocRef.set({ entries: trimmed });
 
   return { rank: rankIndex >= 0 ? rankIndex + 1 : null, entries: trimmed };
@@ -144,8 +160,8 @@ async function saveLeaderboardEntry(name, score) {
 const Game = {
   canvas: null,
   ctx: null,
-  width: 0,
-  height: 0,
+  width: 0,   // logical (CSS-pixel) canvas width — varies per device/orientation
+  height: 0,  // logical (CSS-pixel) canvas height
 
   running: false,
   score: 0,
@@ -154,24 +170,30 @@ const Game = {
   bird: { x: 0, y: 0, vy: 0, radius: 0 },
   pipes: [],
 
+  // All of these are RATIOS, not raw pixels — the canvas can be a wide
+  // 16:9 desktop frame or a tall phone screen, so every gameplay constant
+  // is derived from the actual canvas size each time it's (re)sized. The
+  // ratios below were reverse-engineered from values already tuned to
+  // feel right at 960x540, so the feel is preserved everywhere.
   _ratios: {
-    birdRadius: 0.0519,
-    gravity: 0.000463,
-    flapStrength: -0.011481,
-    maxFallSpeed: 0.014815,
-    pipeGapY: 0.45,
-    pipeWidth: 0.104167,
-    basePipeGapX: 0.490,
-    unitSpeed: 0.0020833
+    birdRadius: 0.0519,     // relative to height
+    gravity: 0.000463,      // relative to height, applied per 60fps-equivalent frame
+    flapStrength: -0.011481,// relative to height
+    maxFallSpeed: 0.014815, // relative to height
+    pipeGapY: 0.45,       // relative to height
+    pipeWidth: 0.104167,    // relative to width
+    basePipeGapX: 0.490,   // relative to width, at speed multiplier 1.0
+    unitSpeed: 0.0020833    // relative to width, pipe speed AT multiplier 1.0
   },
 
+  // Speed multiplier progression: adjusted for smooth playability
   speedMultiplierMin: 1.0,
-  speedMultiplierMax: 2.5,
-  speedMultiplierStep: 0.25,
-  speedMultiplierStepScore: 5,
+  speedMultiplierMax: 2.5,       // Max 2.5x speed cap
+  speedMultiplierStep: 0.25,     // Increases smoothly by 15% every 5 points
+  speedMultiplierStepScore: 5,  // bump the step every N points
 
-  speed: 0,
-  _unitSpeed: 0,
+  speed: 0,        // current pipe speed, in real px/frame-equivalent (derived, not a ratio)
+  _unitSpeed: 0,    // px/frame-equivalent at multiplier 1.0 for the current canvas size
   basePipeGapXPx: 0,
   pipeGapY: 0,
   pipeWidth: 0,
@@ -181,8 +203,8 @@ const Game = {
 
   skinImage: null,
 
-  onScoreUpdate: null,
-  onGameOver: null,
+  onScoreUpdate: null,   // callback(score) — drives HUD score display
+  onGameOver: null,      // callback(finalScore, coinsEarned)
 
   init(canvas) {
     this.canvas = canvas;
@@ -191,6 +213,10 @@ const Game = {
     window.addEventListener("resize", () => this.resize());
   },
 
+  // Sizes the canvas to whatever CSS gives it (full-bleed on mobile,
+  // letterboxed 16:9 frame on desktop) and recalculates every gameplay
+  // constant from that actual size. Also handles device pixel ratio so
+  // it's crisp on high-DPI phone screens.
   resize() {
     if (!this.canvas) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -243,11 +269,15 @@ const Game = {
     this.running = true;
     this.paused = false;
     this._spawnInitialPipes();
+    // Grace period in real milliseconds (not frame count) so it lasts the
+    // same amount of real time regardless of screen refresh rate.
     this._graceMs = 500;
     this._lastTimestamp = null;
     requestAnimationFrame((t) => this._loop(t));
   },
 
+  // Pausing stops the loop entirely (no wasted rAF calls) rather than just
+  // skipping updates — the canvas simply freezes on its last rendered frame.
   pause() {
     if (!this.running || this.paused) return;
     this.paused = true;
@@ -256,6 +286,8 @@ const Game = {
   resume() {
     if (!this.running || !this.paused) return;
     this.paused = false;
+    // Reset the timestamp so the first frame back doesn't see a huge
+    // elapsed-time gap (which the dt clamp would otherwise have to eat).
     this._lastTimestamp = null;
     requestAnimationFrame((t) => this._loop(t));
   },
@@ -267,7 +299,7 @@ const Game = {
     const tap = document.getElementById("sfx-tap");
     if (tap) {
       tap.currentTime = 0;
-      tap.play().catch(() => {});
+      tap.play().catch(() => {}); // ignore autoplay-policy rejections
     }
   },
 
@@ -281,6 +313,7 @@ const Game = {
 
   _currentPipeGapX() {
     const mobileMultiplier = this.width < 700 ? 1.5 : 1.0;
+    // Returns a fixed physical distance, completely ignoring the current speed
     return this.basePipeGapXPx * mobileMultiplier;
   },
   
@@ -290,6 +323,7 @@ const Game = {
     this.pipes.push({ x, gapCenter, passed: false });
   },
 
+  // Speed steps up gradually without breaking the pipe distance mechanics
   _updateDifficulty(dt) {
     const steps = Math.floor(this.score / this.speedMultiplierStepScore);
     let targetMultiplier = this.speedMultiplierMin + steps * this.speedMultiplierStep;
@@ -306,6 +340,8 @@ const Game = {
     const elapsedMs = timestamp - this._lastTimestamp;
     this._lastTimestamp = timestamp;
 
+    // dt = 1.0 at a perfect 60fps frame. Clamped so a dropped/backgrounded
+    // tab resuming doesn't cause the bird to teleport through a pipe.
     const dt = Math.min(Math.max(elapsedMs / (1000 / 60), 0), 3);
 
     this._update(dt, elapsedMs);
@@ -369,7 +405,7 @@ const Game = {
     const point = document.getElementById("sfx-point");
     if (point) {
       point.currentTime = 0;
-      point.play().catch(() => {});
+      point.play().catch(() => {}); // ignore autoplay-policy rejections
     }
 
     if (this.onScoreUpdate) this.onScoreUpdate(this.score);
@@ -378,6 +414,7 @@ const Game = {
   _gameOver() {
     this.running = false;
 
+    // Play game over sound
     const gameover = document.getElementById("sfx-gameover");
     if (gameover) {
         gameover.currentTime = 0;
@@ -389,10 +426,12 @@ const Game = {
     }
   },
 
+  // ---- Procedural pipe art (jade/stone pillar, no image file needed) ----
   _drawPipeSegment(ctx, x, segY, w, h, capAtBottom) {
     if (h <= 0) return;
     const capH = Math.max(18, h * 0.09);
 
+    // Stone body
     const bodyGrad = ctx.createLinearGradient(x, 0, x + w, 0);
     bodyGrad.addColorStop(0, "#152f3d");
     bodyGrad.addColorStop(0.5, "#2f6e7d");
@@ -400,6 +439,7 @@ const Game = {
     ctx.fillStyle = bodyGrad;
     ctx.fillRect(x, segY, w, h);
 
+    // Faint horizontal stone-block seams
     ctx.strokeStyle = "rgba(255,255,255,0.07)";
     ctx.lineWidth = 1;
     for (let ly = segY + 16; ly < segY + h - 4; ly += 30) {
@@ -409,6 +449,7 @@ const Game = {
       ctx.stroke();
     }
 
+    // Jade rim at the open end (the end facing the gap)
     const capY = capAtBottom ? segY + h - capH : segY;
     const capGrad = ctx.createLinearGradient(x - w * 0.07, 0, x + w + w * 0.07, 0);
     capGrad.addColorStop(0, "#0e2530");
@@ -417,6 +458,7 @@ const Game = {
     ctx.fillStyle = capGrad;
     ctx.fillRect(x - w * 0.07, capY, w * 1.14, capH);
 
+    // Soft glowing edge right at the gap boundary
     const glowY = capAtBottom ? capY + capH - 3 : capY;
     ctx.fillStyle = "rgba(190, 255, 245, 0.6)";
     ctx.fillRect(x - w * 0.07, glowY, w * 1.14, 3);
@@ -424,9 +466,14 @@ const Game = {
 
   _render() {
     const ctx = this.ctx;
-    
-    // Clear canvas so the CSS background image (Background.png) shows through
     ctx.clearRect(0, 0, this.width, this.height);
+
+    // Sky gradient matching the background art's misty blue tones
+    const sky = ctx.createLinearGradient(0, 0, 0, this.height);
+    sky.addColorStop(0, "#3f8fd6");
+    sky.addColorStop(1, "#bfe8f5");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, this.width, this.height);
 
     // Pipes
     for (const pipe of this.pipes) {
