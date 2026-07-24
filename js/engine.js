@@ -52,6 +52,7 @@ function tierForSkin(level) {
   return "Basic";
 }
 
+// Prices: Level1 free, Level2 = 10, Level3 = 20, ... Level12 = 110
 const SKINS = Array.from({ length: 12 }, (_, i) => {
   const level = i + 1;
   return {
@@ -82,7 +83,7 @@ function equipSkin(level) {
   return true;
 }
 
-// ---------- Leaderboard ----------
+// ---------- Leaderboard (Firebase Firestore, no login) ----------
 const firebaseConfig = {
   apiKey: "AIzaSyDQHGHt9XeQ0HG70vfC0fu-qT5VtsISKFY",
   authDomain: "hollowboat1.firebaseapp.com",
@@ -139,7 +140,7 @@ async function saveLeaderboardEntry(name, score) {
   return { rank: rankIndex >= 0 ? rankIndex + 1 : null, entries: trimmed };
 }
 
-// ---------- Core game ----------
+// ---------- Core game (physics, collision, rendering) ----------
 const Game = {
   canvas: null,
   ctx: null,
@@ -424,10 +425,10 @@ const Game = {
   _render() {
     const ctx = this.ctx;
     
-    // Clear the canvas to keep it transparent for Background.png
+    // Clear canvas so the CSS background image (Background.png) shows through
     ctx.clearRect(0, 0, this.width, this.height);
 
-    // Render Pipes
+    // Pipes
     for (const pipe of this.pipes) {
       const topHeight = pipe.gapCenter - this.pipeGapY / 2;
       const bottomY = pipe.gapCenter + this.pipeGapY / 2;
@@ -437,7 +438,7 @@ const Game = {
       this._drawPipeSegment(ctx, pipe.x, bottomY, this.pipeWidth, bottomHeight, false);
     }
 
-    // Render Bird
+    // Bird
     if (this.skinImage && this.skinImage.complete) {
       const size = this.bird.radius * 4.2;
       ctx.drawImage(this.skinImage, this.bird.x - size / 2, this.bird.y - size / 2, size, size);
