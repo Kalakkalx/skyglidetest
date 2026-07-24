@@ -9,16 +9,14 @@ const STORAGE_KEYS = {
   highScore: "highScore",
   unlockedSkins: "unlockedSkins",
   currentSkin: "currentSkin"
-  
 };
 
 const LocalState = {
-  
   getPlayerName() {
-  return localStorage.getItem(STORAGE_KEYS.playerName) || "";
+    return localStorage.getItem(STORAGE_KEYS.playerName) || "";
   },
   setPlayerName(name) {
-  localStorage.setItem(STORAGE_KEYS.playerName, name);
+    localStorage.setItem(STORAGE_KEYS.playerName, name);
   },
   getCoins() {
     return Number(localStorage.getItem(STORAGE_KEYS.coins)) || 0;
@@ -124,20 +122,35 @@ async function checkLeaderboardEligibility(score) {
   return score > lowestScore;
 }
 
-// Re-fetches fresh (to shrink the race window against another player
-// saving at nearly the same moment), inserts the new entry, sorts
-// descending, and keeps only the top 20 before writing back.
+// Re-fetches fresh, checks if the player already exists, updates their score 
+// only if it's higher, sorts descending, and keeps only the top 20.
 async function saveLeaderboardEntry(name, score) {
   const entries = await fetchLeaderboard();
 
-  const newEntry = { name, score, _t: Date.now() }; // _t is only for stable tie-breaking, stripped before saving
-  entries.push(newEntry);
+  // 1. Check if this player is already on the leaderboard
+  const existingIndex = entries.findIndex(e => e.name === name);
+  
+  if (existingIndex >= 0) {
+    // Player exists! Only update them if this is a new high score
+    if (score > entries[existingIndex].score) {
+      entries[existingIndex].score = score;
+      entries[existingIndex]._t = Date.now(); // update tiebreaker time
+    }
+  } else {
+    // 2. Player is new, add them to the array
+    entries.push({ name, score, _t: Date.now() });
+  }
+
+  // 3. Sort descending
   entries.sort((a, b) => b.score - a.score || (a._t || 0) - (b._t || 0));
 
+  // 4. Trim to Top 20 and find their new rank
   const trimmedWithTiebreaker = entries.slice(0, LEADERBOARD_MAX);
-  const rankIndex = trimmedWithTiebreaker.indexOf(newEntry); // reference match — reliable even with duplicate name/score
+  const rankIndex = trimmedWithTiebreaker.findIndex(e => e.name === name); // match by name now
+  
   const trimmed = trimmedWithTiebreaker.map(({ name, score }) => ({ name, score }));
 
+  // 5. Save back to Firestore
   await leaderboardDocRef.set({ entries: trimmed });
 
   return { rank: rankIndex >= 0 ? rankIndex + 1 : null, entries: trimmed };
@@ -298,7 +311,7 @@ const Game = {
     }
   },
 
- _currentPipeGapX() {
+  _currentPipeGapX() {
     const mobileMultiplier = this.width < 700 ? 1.5 : 1.0;
     // Returns a fixed physical distance, completely ignoring the current speed
     return this.basePipeGapXPx * mobileMultiplier;
