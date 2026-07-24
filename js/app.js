@@ -139,7 +139,13 @@ const UI = {
 
     const coins = LocalState.getCoins() + coinsEarnedThisRun;
     LocalState.setCoins(coins);
-    if (finalScore > LocalState.getHighScore()) LocalState.setHighScore(finalScore);
+    
+    // Check if it's a new personal record before overwriting it
+    const isNewRecord = finalScore > LocalState.getHighScore();
+    if (isNewRecord) {
+      LocalState.setHighScore(finalScore);
+    }
+    
     const highScore = LocalState.getHighScore();
 
     document.getElementById("go-coins").textContent = coins;
@@ -148,30 +154,34 @@ const UI = {
     this._resetLeaderboardPromptUI();
     this.showScreen("screen-gameover");
 
-    // Silent eligibility check — the player only ever sees the prompt if
-    // they actually qualify. Any Firebase hiccup here is swallowed so a
-    // flaky connection never blocks or nags on the Game Over screen.
     this._pendingLeaderboardScore = finalScore;
-    try {
-      const eligible = await checkLeaderboardEligibility(finalScore);
-
-if (eligible) {
+    
+    // ONLY check the leaderboard if they set a new personal record 
+    // OR if they haven't picked a name yet
     const savedName = LocalState.getPlayerName();
+    
+    if (isNewRecord || (!savedName && finalScore > 0)) {
+      try {
+        const eligible = await checkLeaderboardEligibility(finalScore);
 
-    if (savedName) {
-        const result = await saveLeaderboardEntry(savedName, finalScore);
+        if (eligible) {
+          if (savedName) {
+            // Auto-update their existing score in the background
+            const result = await saveLeaderboardEntry(savedName, finalScore);
 
-        const msg = document.getElementById("leaderboard-saved-msg");
-        msg.textContent = result.rank
-            ? `Saved! You're rank #${result.rank} on the Top 20.`
-            : "Saved to the leaderboard!";
-        msg.classList.remove("hidden");
-    } else {
-        this._showLeaderboardPrompt();
-    }
-}
-    } catch (err) {
-      console.error("Leaderboard eligibility check failed:", err);
+            const msg = document.getElementById("leaderboard-saved-msg");
+            msg.textContent = result.rank 
+                ? `Saved! You're rank #${result.rank} on the Top 20.` 
+                : "Saved to the leaderboard!";
+            msg.classList.remove("hidden");
+          } else {
+            // First time qualifying, ask for name
+            this._showLeaderboardPrompt();
+          }
+        }
+      } catch (err) {
+        console.error("Leaderboard eligibility check failed:", err);
+      }
     }
   },
 
@@ -189,9 +199,13 @@ if (eligible) {
   },
 
   async submitLeaderboardName() {
+    const saveBtn = document.getElementById("btn-leaderboard-save");
+    
+    // PREVENT DOUBLE SUBMISSIONS (if button is already disabled, do nothing)
+    if (saveBtn.disabled) return; 
+
     const input = document.getElementById("leaderboard-name-input");
     const errorEl = document.getElementById("leaderboard-prompt-error");
-    const saveBtn = document.getElementById("btn-leaderboard-save");
     const name = input.value.trim();
 
     errorEl.textContent = "";
