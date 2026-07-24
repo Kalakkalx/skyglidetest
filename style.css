@@ -6,14 +6,14 @@
 }
 
 body {
-  background-color: #111;
+  background-color: #111; /* Dark backdrop for desktop margins */
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   color: #fff;
   height: 100dvh;
   display: flex;
   justify-content: center;
   align-items: center;
-  touch-action: none;
+  touch-action: none; /* Disables pull-to-refresh & pinch zoom */
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
@@ -23,13 +23,12 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
-  max-width: 500px;
-  /* BACKGROUND IMAGE SET HERE */
-  background-image: url('images/Background.png');
+  max-width: 500px; /* Caps width on desktop for perfect portrait feel */
+  background-image: url('images/Background.png'); /* YOUR BACKGROUND IMAGE */
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  background-color: #3f8fd6;
+  background-color: #3f8fd6; /* Fallback color */
   overflow: hidden;
   box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
 }
@@ -50,29 +49,29 @@ body {
   display: flex;
 }
 
-/* Menu overlays with dark glass effect to keep text readable */
+/* Add a dark overlay to menu screens so text is readable over the background */
 .menu-panel {
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.75);
   align-items: center;
   padding: 20px;
 }
 
+/* Opening Screen specific */
 #screen-opening {
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.4);
   align-items: center;
   justify-content: center;
 }
 
 /* ============ GAMEPLAY & CANVAS ============ */
 #screen-game {
-  background: transparent;
+  background: transparent; /* Must be transparent to see the image behind */
 }
 
 #game-canvas {
   width: 100%;
   height: 100%;
   display: block;
-  background: transparent;
 }
 
 /* HUD */
@@ -85,7 +84,7 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   z-index: 20;
-  pointer-events: none;
+  pointer-events: none; /* Let clicks pass through to canvas */
 }
 
 #hud-score {
@@ -95,7 +94,7 @@ body {
 }
 
 .icon-btn {
-  pointer-events: auto;
+  pointer-events: auto; /* Re-enable clicks for buttons */
   background: rgba(0, 0, 0, 0.5);
   border: 2px solid #fff;
   border-radius: 50%;
