@@ -193,14 +193,15 @@ if (eligible) {
     const errorEl = document.getElementById("leaderboard-prompt-error");
     const saveBtn = document.getElementById("btn-leaderboard-save");
     const name = input.value.trim();
-    LocalState.setPlayerName(name);
 
     errorEl.textContent = "";
 
     if (name.length < 3 || name.length > 10) {
-      errorEl.textContent = "Name must be 3\u201310 characters.";
+      errorEl.textContent = "Name must be 3–10 characters.";
       return;
     }
+
+    LocalState.setPlayerName(name);
 
     saveBtn.disabled = true;
     saveBtn.textContent = "...";
