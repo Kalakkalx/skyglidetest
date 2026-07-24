@@ -154,7 +154,22 @@ const UI = {
     this._pendingLeaderboardScore = finalScore;
     try {
       const eligible = await checkLeaderboardEligibility(finalScore);
-      if (eligible) this._showLeaderboardPrompt();
+
+if (eligible) {
+    const savedName = LocalState.getPlayerName();
+
+    if (savedName) {
+        const result = await saveLeaderboardEntry(savedName, finalScore);
+
+        const msg = document.getElementById("leaderboard-saved-msg");
+        msg.textContent = result.rank
+            ? `Saved! You're rank #${result.rank} on the Top 20.`
+            : "Saved to the leaderboard!";
+        msg.classList.remove("hidden");
+    } else {
+        this._showLeaderboardPrompt();
+    }
+}
     } catch (err) {
       console.error("Leaderboard eligibility check failed:", err);
     }
@@ -178,6 +193,7 @@ const UI = {
     const errorEl = document.getElementById("leaderboard-prompt-error");
     const saveBtn = document.getElementById("btn-leaderboard-save");
     const name = input.value.trim();
+    LocalState.setPlayerName(name);
 
     errorEl.textContent = "";
 
