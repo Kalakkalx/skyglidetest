@@ -84,10 +84,6 @@ function equipSkin(level) {
 }
 
 // ---------- Leaderboard (Firebase Firestore, no login) ----------
-// The whole Top 20 lives in a single document so reads/sorts/truncation
-// are all one round trip — no composite queries, no auth required. Write
-// access is restricted to this one document path via Firestore security
-// rules (see firestore.rules), not via any login flow.
 const firebaseConfig = {
   apiKey: "AIzaSyDQHGHt9XeQ0HG70vfC0fu-qT5VtsISKFY",
   authDomain: "hollowboat1.firebaseapp.com",
@@ -104,8 +100,6 @@ const firestoreDb = firebase.firestore();
 const LEADERBOARD_MAX = 20;
 const leaderboardDocRef = firestoreDb.collection("leaderboard").doc("top20");
 
-// Returns the current Top 20 as [{name, score}, ...] sorted highest first.
-// Empty array if the leaderboard doesn't exist yet (first-ever score).
 async function fetchLeaderboard() {
   const snap = await leaderboardDocRef.get();
   if (!snap.exists) return [];
@@ -113,44 +107,34 @@ async function fetchLeaderboard() {
   return Array.isArray(data.entries) ? data.entries : [];
 }
 
-// Silent check — fetches the current list and compares against the lowest
-// qualifying score. Always eligible if the board isn't full yet.
 async function checkLeaderboardEligibility(score) {
   const entries = await fetchLeaderboard();
   if (entries.length < LEADERBOARD_MAX) return true;
-  const lowestScore = entries[entries.length - 1].score; // entries are kept sorted descending
+  const lowestScore = entries[entries.length - 1].score;
   return score > lowestScore;
 }
 
-// Re-fetches fresh, checks if the player already exists, updates their score 
-// only if it's higher, sorts descending, and keeps only the top 20.
 async function saveLeaderboardEntry(name, score) {
   const entries = await fetchLeaderboard();
 
-  // 1. Check if this player is already on the leaderboard
   const existingIndex = entries.findIndex(e => e.name === name);
   
   if (existingIndex >= 0) {
-    // Player exists! Only update them if this is a new high score
     if (score > entries[existingIndex].score) {
       entries[existingIndex].score = score;
-      entries[existingIndex]._t = Date.now(); // update tiebreaker time
+      entries[existingIndex]._t = Date.now();
     }
   } else {
-    // 2. Player is new, add them to the array
     entries.push({ name, score, _t: Date.now() });
   }
 
-  // 3. Sort descending
   entries.sort((a, b) => b.score - a.score || (a._t || 0) - (b._t || 0));
 
-  // 4. Trim to Top 20 and find their new rank
   const trimmedWithTiebreaker = entries.slice(0, LEADERBOARD_MAX);
-  const rankIndex = trimmedWithTiebreaker.findIndex(e => e.name === name); // match by name now
+  const rankIndex = trimmedWithTiebreaker.findIndex(e => e.name === name);
   
   const trimmed = trimmedWithTiebreaker.map(({ name, score }) => ({ name, score }));
 
-  // 5. Save back to Firestore
   await leaderboardDocRef.set({ entries: trimmed });
 
   return { rank: rankIndex >= 0 ? rankIndex + 1 : null, entries: trimmed };
@@ -160,40 +144,37 @@ async function saveLeaderboardEntry(name, score) {
 const Game = {
   canvas: null,
   ctx: null,
-  width: 0,   // logical (CSS-pixel) canvas width — varies per device/orientation
-  height: 0,  // logical (CSS-pixel) canvas height
+  width: 0,
+  height: 0,
 
   running: false,
+  paused: false,
+  countingDown: false,
+  _countdownInterval: null, // Track timer ID to clear when resetting/pausing
   score: 0,
   coinsThisRun: 0,
 
   bird: { x: 0, y: 0, vy: 0, radius: 0 },
   pipes: [],
 
-  // All of these are RATIOS, not raw pixels — the canvas can be a wide
-  // 16:9 desktop frame or a tall phone screen, so every gameplay constant
-  // is derived from the actual canvas size each time it's (re)sized. The
-  // ratios below were reverse-engineered from values already tuned to
-  // feel right at 960x540, so the feel is preserved everywhere.
   _ratios: {
-    birdRadius: 0.0519,     // relative to height
-    gravity: 0.000463,      // relative to height, applied per 60fps-equivalent frame
-    flapStrength: -0.011481,// relative to height
-    maxFallSpeed: 0.014815, // relative to height
-    pipeGapY: 0.45,       // relative to height
-    pipeWidth: 0.104167,    // relative to width
-    basePipeGapX: 0.490,   // relative to width, at speed multiplier 1.0
-    unitSpeed: 0.0020833    // relative to width, pipe speed AT multiplier 1.0
+    birdRadius: 0.0519,
+    gravity: 0.000463,
+    flapStrength: -0.011481,
+    maxFallSpeed: 0.014815,
+    pipeGapY: 0.45,
+    pipeWidth: 0.104167,
+    basePipeGapX: 0.490,
+    unitSpeed: 0.0020833
   },
 
-  // Speed multiplier progression: adjusted for smooth playability
-  speedMultiplierMin: 1.0,
-  speedMultiplierMax: 2.5,       // Max 2.5x speed cap
-  speedMultiplierStep: 0.25,     // Increases smoothly by 15% every 5 points
-  speedMultiplierStepScore: 5,  // bump the step every N points
+  speedMultiplierMin: 1.4,
+  speedMultiplierMax: 4.0,       // Max 4.0x speed cap
+  speedMultiplierStep: 0.25,     // Increases smoothly every 5 points
+  speedMultiplierStepScore: 5,
 
-  speed: 0,        // current pipe speed, in real px/frame-equivalent (derived, not a ratio)
-  _unitSpeed: 0,    // px/frame-equivalent at multiplier 1.0 for the current canvas size
+  speed: 0,
+  _unitSpeed: 0,
   basePipeGapXPx: 0,
   pipeGapY: 0,
   pipeWidth: 0,
@@ -203,8 +184,8 @@ const Game = {
 
   skinImage: null,
 
-  onScoreUpdate: null,   // callback(score) — drives HUD score display
-  onGameOver: null,      // callback(finalScore, coinsEarned)
+  onScoreUpdate: null,
+  onGameOver: null,
 
   init(canvas) {
     this.canvas = canvas;
@@ -213,10 +194,6 @@ const Game = {
     window.addEventListener("resize", () => this.resize());
   },
 
-  // Sizes the canvas to whatever CSS gives it (full-bleed on mobile,
-  // letterboxed 16:9 frame on desktop) and recalculates every gameplay
-  // constant from that actual size. Also handles device pixel ratio so
-  // it's crisp on high-DPI phone screens.
   resize() {
     if (!this.canvas) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -251,6 +228,12 @@ const Game = {
   },
 
   start(skinLevel) {
+    // Clear any lingering countdown interval if restarting mid-countdown
+    if (this._countdownInterval) {
+      clearInterval(this._countdownInterval);
+      this._countdownInterval = null;
+    }
+
     this.loadSkin(skinLevel);
     this._recalcConstants();
 
@@ -268,38 +251,67 @@ const Game = {
 
     this.running = true;
     this.paused = false;
+    this.countingDown = false;
     this._spawnInitialPipes();
-    // Grace period in real milliseconds (not frame count) so it lasts the
-    // same amount of real time regardless of screen refresh rate.
     this._graceMs = 500;
     this._lastTimestamp = null;
     requestAnimationFrame((t) => this._loop(t));
   },
 
-  // Pausing stops the loop entirely (no wasted rAF calls) rather than just
-  // skipping updates — the canvas simply freezes on its last rendered frame.
-  pause() {
-    if (!this.running || this.paused) return;
-    this.paused = true;
+  togglePause() {
+    if (!this.running) return false;
+
+    // If currently in a countdown, cancel it and re-pause
+    if (this.countingDown) {
+      if (this._countdownInterval) {
+        clearInterval(this._countdownInterval);
+        this._countdownInterval = null;
+      }
+      this.countingDown = false;
+      this.paused = true;
+      return true;
+    }
+
+    if (!this.paused) {
+      this.paused = true;
+      return true;
+    }
+    return false;
   },
 
-  resume() {
-    if (!this.running || !this.paused) return;
-    this.paused = false;
-    // Reset the timestamp so the first frame back doesn't see a huge
-    // elapsed-time gap (which the dt clamp would otherwise have to eat).
-    this._lastTimestamp = null;
-    requestAnimationFrame((t) => this._loop(t));
+  unpauseWithCountdown(onTick, onComplete) {
+    if (!this.paused || this.countingDown) return;
+
+    this.countingDown = true;
+    let count = 3;
+    onTick(count);
+
+    if (this._countdownInterval) clearInterval(this._countdownInterval);
+
+    this._countdownInterval = setInterval(() => {
+      count--;
+      if (count > 0) {
+        onTick(count);
+      } else {
+        clearInterval(this._countdownInterval);
+        this._countdownInterval = null;
+        this.countingDown = false;
+        this.paused = false;
+        this._lastTimestamp = null; // Prevents bird from teleporting after unpause
+        onComplete();
+        requestAnimationFrame((t) => this._loop(t));
+      }
+    }, 700);
   },
 
   flap() {
-    if (!this.running || this.paused) return;
+    if (!this.running || this.paused || this.countingDown) return;
     this.bird.vy = this.flapStrength;
 
     const tap = document.getElementById("sfx-tap");
     if (tap) {
       tap.currentTime = 0;
-      tap.play().catch(() => {}); // ignore autoplay-policy rejections
+      tap.play().catch(() => {});
     }
   },
 
@@ -313,7 +325,6 @@ const Game = {
 
   _currentPipeGapX() {
     const mobileMultiplier = this.width < 700 ? 1.5 : 1.0;
-    // Returns a fixed physical distance, completely ignoring the current speed
     return this.basePipeGapXPx * mobileMultiplier;
   },
   
@@ -323,7 +334,6 @@ const Game = {
     this.pipes.push({ x, gapCenter, passed: false });
   },
 
-  // Speed steps up gradually without breaking the pipe distance mechanics
   _updateDifficulty(dt) {
     const steps = Math.floor(this.score / this.speedMultiplierStepScore);
     let targetMultiplier = this.speedMultiplierMin + steps * this.speedMultiplierStep;
@@ -340,8 +350,6 @@ const Game = {
     const elapsedMs = timestamp - this._lastTimestamp;
     this._lastTimestamp = timestamp;
 
-    // dt = 1.0 at a perfect 60fps frame. Clamped so a dropped/backgrounded
-    // tab resuming doesn't cause the bird to teleport through a pipe.
     const dt = Math.min(Math.max(elapsedMs / (1000 / 60), 0), 3);
 
     this._update(dt, elapsedMs);
@@ -405,7 +413,7 @@ const Game = {
     const point = document.getElementById("sfx-point");
     if (point) {
       point.currentTime = 0;
-      point.play().catch(() => {}); // ignore autoplay-policy rejections
+      point.play().catch(() => {});
     }
 
     if (this.onScoreUpdate) this.onScoreUpdate(this.score);
@@ -414,24 +422,26 @@ const Game = {
   _gameOver() {
     this.running = false;
 
-    // Play game over sound
+    if (this._countdownInterval) {
+      clearInterval(this._countdownInterval);
+      this._countdownInterval = null;
+    }
+
     const gameover = document.getElementById("sfx-gameover");
     if (gameover) {
-        gameover.currentTime = 0;
-        gameover.play().catch(() => {});
+      gameover.currentTime = 0;
+      gameover.play().catch(() => {});
     }
 
     if (this.onGameOver) {
-        this.onGameOver(this.score, this.coinsThisRun);
+      this.onGameOver(this.score, this.coinsThisRun);
     }
   },
 
-  // ---- Procedural pipe art (jade/stone pillar, no image file needed) ----
   _drawPipeSegment(ctx, x, segY, w, h, capAtBottom) {
     if (h <= 0) return;
     const capH = Math.max(18, h * 0.09);
 
-    // Stone body
     const bodyGrad = ctx.createLinearGradient(x, 0, x + w, 0);
     bodyGrad.addColorStop(0, "#152f3d");
     bodyGrad.addColorStop(0.5, "#2f6e7d");
@@ -439,7 +449,6 @@ const Game = {
     ctx.fillStyle = bodyGrad;
     ctx.fillRect(x, segY, w, h);
 
-    // Faint horizontal stone-block seams
     ctx.strokeStyle = "rgba(255,255,255,0.07)";
     ctx.lineWidth = 1;
     for (let ly = segY + 16; ly < segY + h - 4; ly += 30) {
@@ -449,7 +458,6 @@ const Game = {
       ctx.stroke();
     }
 
-    // Jade rim at the open end (the end facing the gap)
     const capY = capAtBottom ? segY + h - capH : segY;
     const capGrad = ctx.createLinearGradient(x - w * 0.07, 0, x + w + w * 0.07, 0);
     capGrad.addColorStop(0, "#0e2530");
@@ -458,7 +466,6 @@ const Game = {
     ctx.fillStyle = capGrad;
     ctx.fillRect(x - w * 0.07, capY, w * 1.14, capH);
 
-    // Soft glowing edge right at the gap boundary
     const glowY = capAtBottom ? capY + capH - 3 : capY;
     ctx.fillStyle = "rgba(190, 255, 245, 0.6)";
     ctx.fillRect(x - w * 0.07, glowY, w * 1.14, 3);
@@ -468,7 +475,6 @@ const Game = {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
 
-    // Pipes
     for (const pipe of this.pipes) {
       const topHeight = pipe.gapCenter - this.pipeGapY / 2;
       const bottomY = pipe.gapCenter + this.pipeGapY / 2;
@@ -478,7 +484,6 @@ const Game = {
       this._drawPipeSegment(ctx, pipe.x, bottomY, this.pipeWidth, bottomHeight, false);
     }
 
-    // Bird
     if (this.skinImage && this.skinImage.complete) {
       const size = this.bird.radius * 4.2;
       ctx.drawImage(this.skinImage, this.bird.x - size / 2, this.bird.y - size / 2, size, size);
