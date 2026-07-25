@@ -6,6 +6,8 @@
 const UI = {
   skinsReturnTo: "screen-opening", // where "BACK" on the Skins screen goes
   _pendingLeaderboardScore: 0,      // score awaiting a possible Top 20 save
+  _leaderboardEntries: [],          // cached Top 20 entries for real-time HUD tracking
+  _highScoreBannerShown: false,     // prevents duplicate high score popups during a run
 
   showScreen(id) {
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -99,12 +101,43 @@ const UI = {
     const hudScore = document.getElementById("hud-score");
     if (hudScore) hudScore.textContent = "0";
 
+    const rankDisplay = document.getElementById("hud-next-rank");
+    if (rankDisplay) rankDisplay.textContent = "";
+
+    const hsBanner = document.getElementById("hud-highscore-banner");
+    if (hsBanner) hsBanner.classList.add("hidden");
+
+    // Reset high score banner trigger for this run
+    this._highScoreBannerShown = false;
+    const previousHighScore = LocalState.getHighScore();
+
+    // Fetch leaderboard entries to display live "Points to Reach Rank X" goals
+    this._leaderboardEntries = [];
+    fetchLeaderboard().then(entries => {
+      this._leaderboardEntries = entries;
+      this._updateRankDisplay(0);
+    }).catch(() => {});
+
     // Make sure pause overlay is hidden on start
     const overlay = document.getElementById("pause-overlay");
     if (overlay) overlay.classList.add("hidden");
 
     Game.onScoreUpdate = (score) => {
       if (hudScore) hudScore.textContent = score;
+
+      // Check 1-second "NEW HIGH SCORE" popup banner
+      if (previousHighScore > 0 && score >= previousHighScore && !this._highScoreBannerShown) {
+        this._highScoreBannerShown = true;
+        if (hsBanner) {
+          hsBanner.classList.remove("hidden");
+          setTimeout(() => {
+            hsBanner.classList.add("hidden");
+          }, 1000);
+        }
+      }
+
+      // Live update target rank tracking display
+      this._updateRankDisplay(score);
     };
 
     Game.onGameOver = (finalScore, coinsEarned) => this.handleGameOver(finalScore, coinsEarned);
@@ -121,6 +154,37 @@ const UI = {
     Game.start(LocalState.getCurrentSkin());
   },
 
+  _updateRankDisplay(score) {
+    const el = document.getElementById("hud-next-rank");
+    if (!el) return;
+
+    if (!this._leaderboardEntries || this._leaderboardEntries.length === 0) {
+      el.textContent = "";
+      return;
+    }
+
+    // Find the closest leaderboard entry that has a higher score than the player's current score
+    let targetIndex = -1;
+    for (let i = this._leaderboardEntries.length - 1; i >= 0; i--) {
+      if (this._leaderboardEntries[i].score > score) {
+        targetIndex = i;
+      }
+    }
+
+    if (targetIndex === -1) {
+      el.textContent = "Rank 1 Achieved!";
+    } else {
+      const targetEntry = this._leaderboardEntries[targetIndex];
+      const targetRank = targetIndex + 1;
+      const pointsNeeded = (targetEntry.score + 1) - score;
+      if (pointsNeeded > 0) {
+        el.textContent = `${pointsNeeded} Points to Reach Rank ${targetRank}`;
+      } else {
+        el.textContent = `Rank ${targetRank} Reached!`;
+      }
+    }
+  },
+
   // ---------- Pause & Resume ----------
   pauseGame() {
     const success = Game.togglePause();
@@ -128,7 +192,6 @@ const UI = {
       const overlay = document.getElementById("pause-overlay");
       if (overlay) overlay.classList.remove("hidden");
 
-      // Reset resume button text in case a previous countdown was interrupted
       const resumeBtn = document.getElementById("btn-resume");
       if (resumeBtn) {
         resumeBtn.textContent = "RESUME";
@@ -142,14 +205,12 @@ const UI = {
 
     Game.unpauseWithCountdown(
       (count) => {
-        // Step tick: update button text
         if (resumeBtn) {
           resumeBtn.textContent = `RESUMING IN ${count}...`;
           resumeBtn.disabled = true;
         }
       },
       () => {
-        // Complete: hide overlay and reset button
         const overlay = document.getElementById("pause-overlay");
         if (overlay) overlay.classList.add("hidden");
 
@@ -205,8 +266,7 @@ const UI = {
 
     this._pendingLeaderboardScore = finalScore;
     
-    // ONLY check the leaderboard if they set a new personal record 
-    // OR if they haven't picked a name yet
+    // Check the leaderboard if new personal record OR if name isn't set yet
     const savedName = LocalState.getPlayerName();
     
     if (isNewRecord || (!savedName && finalScore > 0)) {
@@ -215,19 +275,19 @@ const UI = {
 
         if (eligible) {
           if (savedName) {
-            // Auto-update their existing score in the background
+            // Auto-update score on leaderboard
             const result = await saveLeaderboardEntry(savedName, finalScore);
 
             const msg = document.getElementById("leaderboard-saved-msg");
             if (msg) {
-                msg.textContent = result.rank 
-                    ? `Saved! You're rank #${result.rank} on the Top 20.` 
-                    : "Saved to the leaderboard!";
-                msg.classList.remove("hidden");
-                msg.style.display = ""; // Ensure it's visible
+              msg.textContent = result.rank 
+                ? `Saved! You're rank #${result.rank} on the Top 20.` 
+                : "Saved to the leaderboard!";
+              msg.classList.remove("hidden");
+              msg.style.display = "";
             }
           } else {
-            // First time qualifying, ask for name
+            // Prompt user for name entry
             this._showLeaderboardPrompt();
           }
         }
@@ -239,7 +299,6 @@ const UI = {
 
   // ---------- Leaderboard ----------
   _resetLeaderboardPromptUI() {
-    // Forcefully hide elements by their exact IDs to prevent layout bugs
     const prompt = document.getElementById("leaderboard-prompt");
     if (prompt) { prompt.classList.add("hidden"); prompt.style.display = "none"; }
 
@@ -248,9 +307,9 @@ const UI = {
 
     const input = document.getElementById("leaderboard-name-input");
     if (input) { 
-        input.classList.add("hidden"); 
-        input.style.display = "none"; 
-        input.value = ""; 
+      input.classList.add("hidden"); 
+      input.style.display = "none"; 
+      input.value = ""; 
     }
 
     const btn = document.getElementById("btn-leaderboard-save");
@@ -266,9 +325,9 @@ const UI = {
 
     const input = document.getElementById("leaderboard-name-input");
     if (input) { 
-        input.classList.remove("hidden"); 
-        input.style.display = ""; 
-        input.focus(); 
+      input.classList.remove("hidden"); 
+      input.style.display = ""; 
+      input.focus(); 
     }
 
     const btn = document.getElementById("btn-leaderboard-save");
@@ -278,7 +337,6 @@ const UI = {
   async submitLeaderboardName() {
     const saveBtn = document.getElementById("btn-leaderboard-save");
     
-    // PREVENT DOUBLE SUBMISSIONS 
     if (saveBtn && saveBtn.disabled) return; 
 
     const input = document.getElementById("leaderboard-name-input");
@@ -295,14 +353,13 @@ const UI = {
     LocalState.setPlayerName(name);
 
     if (saveBtn) {
-        saveBtn.disabled = true;
-        saveBtn.textContent = "...";
+      saveBtn.disabled = true;
+      saveBtn.textContent = "...";
     }
 
     try {
       const result = await saveLeaderboardEntry(name, this._pendingLeaderboardScore);
 
-      // Explicitly hide inputs upon success
       const prompt = document.getElementById("leaderboard-prompt");
       if (prompt) { prompt.classList.add("hidden"); prompt.style.display = "none"; }
 
@@ -322,8 +379,8 @@ const UI = {
       if (errorEl) errorEl.textContent = "Couldn't save right now. Please try again.";
     } finally {
       if (saveBtn) {
-          saveBtn.disabled = false;
-          saveBtn.textContent = "SAVE";
+        saveBtn.disabled = false;
+        saveBtn.textContent = "SAVE";
       }
     }
   },
@@ -372,8 +429,8 @@ const UI = {
 // ---------- Event wiring ----------
 document.addEventListener("DOMContentLoaded", () => {
   const safeBind = (id, event, callback) => {
-      const el = document.getElementById(id);
-      if (el) el.addEventListener(event, callback);
+    const el = document.getElementById(id);
+    if (el) el.addEventListener(event, callback);
   };
 
   // Opening screen
@@ -402,9 +459,9 @@ document.addEventListener("DOMContentLoaded", () => {
   
   const nameInput = document.getElementById("leaderboard-name-input");
   if (nameInput) {
-      nameInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") UI.submitLeaderboardName();
-      });
+    nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") UI.submitLeaderboardName();
+    });
   }
 
   // Leaderboard screen
