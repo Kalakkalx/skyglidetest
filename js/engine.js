@@ -2,12 +2,12 @@
 // Local storage, skins, and core game physics/rendering — everything that
 // is NOT screen/DOM management (that lives in app.js).
 
-// ---------- Trail Size Settings (Editable) ----------
+// ---------- Trail Size Settings ----------
 const startrailsize = 2;
 const mastertrailsize = 3;
 const elitetrailsize = 4;
 
-// ---------- Local storage (all game state lives here) ----------
+// ---------- Local storage ----------
 const STORAGE_KEYS = {
   playerName: "playerName",
   coins: "coins",
@@ -49,7 +49,7 @@ const LocalState = {
   }
 };
 
-// ---------- Skins ----------
+// ---------- Skins & Smooth Pricing ----------
 function tierForSkin(level) {
   if (level >= 10) return "Elite";
   if (level >= 7) return "Master";
@@ -57,13 +57,13 @@ function tierForSkin(level) {
   return "Basic";
 }
 
-// Prices: Level 1 free (0), Level 2 = 10, increasing up to Level 12 = 150
+// Prices: Level 1 = 0 (Free), Level 2 = 10, scaling smoothly up to Level 12 = 150
 const SKINS = Array.from({ length: 12 }, (_, i) => {
   const level = i + 1;
   return {
     level,
     file: `images/Level${level}.png`,
-    price: level === 1 ? 0 : 10 + (level - 2) * 14,
+    price: level === 1 ? 0 : 10 + (level - 2) * 14, // 10, 24, 38, ... 150
     tier: tierForSkin(level)
   };
 });
@@ -88,7 +88,7 @@ function equipSkin(level) {
   return true;
 }
 
-// ---------- Leaderboard (Firebase Firestore, no login) ----------
+// ---------- Leaderboard (Firebase Firestore) ----------
 const firebaseConfig = {
   apiKey: "AIzaSyDQHGHt9XeQ0HG70vfC0fu-qT5VtsISKFY",
   authDomain: "hollowboat1.firebaseapp.com",
@@ -121,7 +121,6 @@ async function checkLeaderboardEligibility(score) {
 
 async function saveLeaderboardEntry(name, score) {
   const entries = await fetchLeaderboard();
-
   const existingIndex = entries.findIndex(e => e.name === name);
   
   if (existingIndex >= 0) {
@@ -137,15 +136,97 @@ async function saveLeaderboardEntry(name, score) {
 
   const trimmedWithTiebreaker = entries.slice(0, LEADERBOARD_MAX);
   const rankIndex = trimmedWithTiebreaker.findIndex(e => e.name === name);
-  
   const trimmed = trimmedWithTiebreaker.map(({ name, score }) => ({ name, score }));
 
   await leaderboardDocRef.set({ entries: trimmed });
-
   return { rank: rankIndex >= 0 ? rankIndex + 1 : null, entries: trimmed };
 }
 
-// ---------- Core game (physics, collision, rendering) ----------
+// ---------- Glowing Comet & Stardust Particle Trail ----------
+class CometTrailSystem {
+  constructor() {
+    this.history = [];
+    this.sparkles = [];
+  }
+
+  reset() {
+    this.history = [];
+    this.sparkles = [];
+  }
+
+  update(x, y, maxHistory, isFlapping) {
+    if (maxHistory <= 0) {
+      this.history = [];
+      return;
+    }
+
+    this.history.unshift({ x, y });
+    if (this.history.length > maxHistory * 5) {
+      this.history.pop();
+    }
+
+    // Spawn floating stardust sparkles
+    const spawnCount = isFlapping ? 3 : 1;
+    for (let i = 0; i < spawnCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 1.5;
+      this.sparkles.push({
+        x: x + (Math.random() - 0.5) * 8,
+        y: y + (Math.random() - 0.5) * 8,
+        vx: Math.cos(angle) * speed - 1.5,
+        vy: Math.sin(angle) * speed,
+        size: Math.random() * 2 + 1,
+        life: 1.0,
+        decay: Math.random() * 0.04 + 0.02
+      });
+    }
+
+    // Update sparkles
+    for (let i = this.sparkles.length - 1; i >= 0; i--) {
+      const p = this.sparkles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+      p.size *= 0.95;
+      if (p.life <= 0) this.sparkles.splice(i, 1);
+    }
+  }
+
+  draw(ctx) {
+    if (this.history.length < 2 && this.sparkles.length === 0) return;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter"; // Additive glow pass
+
+    // 1. Draw glowing ribbon tail
+    for (let i = 0; i < this.history.length - 1; i++) {
+      const p1 = this.history[i];
+      const p2 = this.history[i + 1];
+      const progress = 1 - i / this.history.length;
+
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.strokeStyle = `rgba(0, 212, 255, ${progress * 0.7})`;
+      ctx.lineWidth = progress * 10;
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+
+    // 2. Draw stardust sparkles
+    this.sparkles.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fillStyle = "#80e5ff";
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fill();
+    });
+
+    ctx.restore();
+  }
+}
+
+// ---------- Core Game ----------
 const Game = {
   canvas: null,
   ctx: null,
@@ -163,8 +244,7 @@ const Game = {
   bird: { x: 0, y: 0, vy: 0, radius: 0, rotation: 0 },
   pipes: [],
   
-  // Motion trail and particle systems
-  trail: [],
+  cometTrail: new CometTrailSystem(),
   particles: [],
   currentSkinLevel: 1,
 
@@ -204,7 +284,6 @@ const Game = {
     this.resize();
     window.addEventListener("resize", () => this.resize());
     
-    // Pre-adjust SFX volume to 70%
     const s1 = document.getElementById("sfx-point");
     const s2 = document.getElementById("sfx-tap");
     if (s1) s1.volume = 0.7;
@@ -258,7 +337,7 @@ const Game = {
     this.coinsThisRun = 0;
     this.speed = this._unitSpeed * this.speedMultiplierMin;
     this.pipes = [];
-    this.trail = [];
+    this.cometTrail.reset();
     this.particles = [];
 
     this.bird = {
@@ -327,6 +406,7 @@ const Game = {
   flap() {
     if (!this.running || this.paused || this.countingDown || this.dying) return;
     this.bird.vy = this.flapStrength;
+    this._justFlapped = true;
 
     const tap = document.getElementById("sfx-tap");
     if (tap) {
@@ -379,12 +459,9 @@ const Game = {
   },
 
   _update(dt, elapsedMs) {
-    // Handling Hit/Dying Animation
     if (this.dying) {
       this.bird.vy += this.gravity * 1.8 * dt;
       this.bird.y += this.bird.vy * dt;
-      
-      // Pitch down sharply when tumbling
       this.bird.rotation = Math.min(Math.PI / 2, this.bird.rotation + 0.12 * dt);
 
       if (this.bird.y + this.bird.radius >= this.height) {
@@ -405,30 +482,25 @@ const Game = {
     }
     this.bird.y += this.bird.vy * dt;
 
-    // Gentle Flap Pitching
-    const maxUpAngle = -0.32; // ~-18 degrees
-    const maxDownAngle = 1.2;  // ~68 degrees
+    const maxUpAngle = -0.32;
+    const maxDownAngle = 1.2;
     if (this.bird.vy < 0) {
       this.bird.rotation = Math.max(maxUpAngle, this.bird.vy * 22);
     } else {
       this.bird.rotation = Math.min(maxDownAngle, this.bird.rotation + 0.04 * dt);
     }
 
-    // Motion Trail Tracking
+    // Motion Trail Tracking per Tier
     const tier = tierForSkin(this.currentSkinLevel);
     let maxTrailLength = 0;
     if (tier === "Star") maxTrailLength = startrailsize;
     else if (tier === "Master") maxTrailLength = mastertrailsize;
     else if (tier === "Elite") maxTrailLength = elitetrailsize;
 
-    if (maxTrailLength > 0) {
-      this.trail.unshift({ x: this.bird.x, y: this.bird.y, rotation: this.bird.rotation });
-      if (this.trail.length > maxTrailLength) this.trail.pop();
-    } else {
-      this.trail = [];
-    }
+    this.cometTrail.update(this.bird.x, this.bird.y, maxTrailLength, this._justFlapped);
+    this._justFlapped = false;
 
-    // Update Sparkle Particles
+    // Update Particles
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.x += p.vx * dt;
@@ -437,7 +509,7 @@ const Game = {
       if (p.life <= 0) this.particles.splice(i, 1);
     }
 
-    // Ground/Ceiling Boundary Hit
+    // Ground/Ceiling Boundary
     if (this.bird.y + this.bird.radius >= this.height || this.bird.y - this.bird.radius <= 0) {
       this._triggerCollision();
       return;
@@ -456,7 +528,7 @@ const Game = {
       this._spawnPipe(rightmost.x + this._currentPipeGapX());
     }
 
-    // Pipe Collision Check
+    // Pipe Collisions
     for (const pipe of this.pipes) {
       const withinX = this.bird.x + this.bird.radius > pipe.x &&
                        this.bird.x - this.bird.radius < pipe.x + this.pipeWidth;
@@ -485,8 +557,6 @@ const Game = {
   _onScore() {
     this.score += 1;
     this.coinsThisRun += 1;
-
-    // Spawn Golden Sparkles + Floating Text
     this._spawnGoldenSparkles(this.bird.x, this.bird.y);
 
     const point = document.getElementById("sfx-point");
@@ -500,7 +570,6 @@ const Game = {
   },
 
   _spawnGoldenSparkles(x, y) {
-    // Golden star sparkles
     for (let i = 0; i < 8; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 1.5 + Math.random() * 2.5;
@@ -514,7 +583,6 @@ const Game = {
         size: 3 + Math.random() * 4
       });
     }
-    // Floating "+1" text
     this.particles.push({
       x: x + 10,
       y: y - 10,
@@ -583,7 +651,7 @@ const Game = {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
 
-    // Pipes
+    // 1. Draw Pipes
     for (const pipe of this.pipes) {
       const topHeight = pipe.gapCenter - this.pipeGapY / 2;
       const bottomY = pipe.gapCenter + this.pipeGapY / 2;
@@ -593,32 +661,11 @@ const Game = {
       this._drawPipeSegment(ctx, pipe.x, bottomY, this.pipeWidth, bottomHeight, false);
     }
 
-    // Golden Motion Trail for Tiered Skins
+    // 2. Draw Glowing Comet & Stardust Particle Trail
+    this.cometTrail.draw(ctx);
+
+    // 3. Draw Bird Sprite
     const size = this.bird.radius * 4.2;
-    if (this.trail.length > 0) {
-      for (let i = 0; i < this.trail.length; i++) {
-        const t = this.trail[i];
-        const alpha = ((this.trail.length - i) / this.trail.length) * 0.35;
-        ctx.save();
-        ctx.translate(t.x, t.y);
-        ctx.rotate(t.rotation);
-        ctx.globalAlpha = alpha;
-
-        if (this.skinImage && this.skinImage.complete) {
-          ctx.drawImage(this.skinImage, -size / 2, -size / 2, size, size);
-        }
-        
-        // Golden overlay glow on trail
-        ctx.fillStyle = "rgba(255, 215, 0, 0.3)";
-        ctx.beginPath();
-        ctx.arc(0, 0, this.bird.radius * 1.2, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.restore();
-      }
-    }
-
-    // Render Bird with Rotation
     ctx.save();
     ctx.translate(this.bird.x, this.bird.y);
     ctx.rotate(this.bird.rotation);
@@ -633,7 +680,7 @@ const Game = {
     }
     ctx.restore();
 
-    // Render Sparkles and Floating Text
+    // 4. Draw Score Sparkles & Floating Text
     for (const p of this.particles) {
       ctx.save();
       ctx.globalAlpha = p.life;
