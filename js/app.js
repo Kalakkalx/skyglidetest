@@ -5,7 +5,7 @@
 
 const UI = {
   skinsReturnTo: "screen-opening", // where "BACK" on the Skins screen goes
-  _pendingLeaderboardScore: 0,     // score awaiting a possible Top 20 save
+  _pendingLeaderboardScore: 0,      // score awaiting a possible Top 20 save
 
   showScreen(id) {
     document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -99,6 +99,10 @@ const UI = {
     const hudScore = document.getElementById("hud-score");
     if (hudScore) hudScore.textContent = "0";
 
+    // Make sure pause overlay is hidden on start
+    const overlay = document.getElementById("pause-overlay");
+    if (overlay) overlay.classList.add("hidden");
+
     Game.onScoreUpdate = (score) => {
       if (hudScore) hudScore.textContent = score;
     };
@@ -110,31 +114,67 @@ const UI = {
       Game.init(canvas);
       canvas.addEventListener("pointerdown", (e) => {
         e.preventDefault();
-        if (Game.paused) return;
+        if (Game.paused || Game.countingDown) return;
         Game.flap();
       });
     }
     Game.start(LocalState.getCurrentSkin());
   },
 
-  // ---------- Pause ----------
+  // ---------- Pause & Resume ----------
   pauseGame() {
-    Game.pause();
-    const overlay = document.getElementById("pause-overlay");
-    if (overlay) overlay.classList.remove("hidden");
+    const success = Game.togglePause();
+    if (success) {
+      const overlay = document.getElementById("pause-overlay");
+      if (overlay) overlay.classList.remove("hidden");
+
+      // Reset resume button text in case a previous countdown was interrupted
+      const resumeBtn = document.getElementById("btn-resume");
+      if (resumeBtn) {
+        resumeBtn.textContent = "RESUME";
+        resumeBtn.disabled = false;
+      }
+    }
   },
 
   resumeGame() {
-    const overlay = document.getElementById("pause-overlay");
-    if (overlay) overlay.classList.add("hidden");
-    Game.resume();
+    const resumeBtn = document.getElementById("btn-resume");
+
+    Game.unpauseWithCountdown(
+      (count) => {
+        // Step tick: update button text
+        if (resumeBtn) {
+          resumeBtn.textContent = `RESUMING IN ${count}...`;
+          resumeBtn.disabled = true;
+        }
+      },
+      () => {
+        // Complete: hide overlay and reset button
+        const overlay = document.getElementById("pause-overlay");
+        if (overlay) overlay.classList.add("hidden");
+
+        if (resumeBtn) {
+          resumeBtn.textContent = "RESUME";
+          resumeBtn.disabled = false;
+        }
+      }
+    );
   },
 
   quitToMenuFromPause() {
     Game.running = false;   
     Game.paused = false;
+    Game.countingDown = false;
+
     const overlay = document.getElementById("pause-overlay");
     if (overlay) overlay.classList.add("hidden");
+
+    const resumeBtn = document.getElementById("btn-resume");
+    if (resumeBtn) {
+      resumeBtn.textContent = "RESUME";
+      resumeBtn.disabled = false;
+    }
+
     this.goToOpening();
   },
 
