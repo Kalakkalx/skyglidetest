@@ -57,13 +57,13 @@ function tierForSkin(level) {
   return "Basic";
 }
 
-// Prices: Level1 free, Level2 = 10, Level3 = 20, ... Level12 = 110
+// Prices: Level 1 free (0), Level 2 = 10, increasing up to Level 12 = 150
 const SKINS = Array.from({ length: 12 }, (_, i) => {
   const level = i + 1;
   return {
     level,
     file: `images/Level${level}.png`,
-    price: level === 1 ? 0 : (level - 1) * 10,
+    price: level === 1 ? 0 : 10 + (level - 2) * 14,
     tier: tierForSkin(level)
   };
 });
