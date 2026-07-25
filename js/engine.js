@@ -3,9 +3,10 @@
 // is NOT screen/DOM management (that lives in app.js).
 
 // ---------- Trail Size Settings ----------
-const startrailsize = 2;
-const mastertrailsize = 3;
-const elitetrailsize = 4;
+// Number of path tracking points for each tier
+const startrailsize = 18;    // Short subtle beam
+const mastertrailsize = 35;  // Medium bright comet
+const elitetrailsize = 65;   // Long sweeping comet (~2+ bird lengths)
 
 // ---------- Local storage ----------
 const STORAGE_KEYS = {
@@ -63,7 +64,7 @@ const SKINS = Array.from({ length: 12 }, (_, i) => {
   return {
     level,
     file: `images/Level${level}.png`,
-    price: level === 1 ? 0 : 10 + (level - 2) * 14, // 10, 24, 38, ... 150
+    price: level === 1 ? 0 : 10 + (level - 2) * 14,
     tier: tierForSkin(level)
   };
 });
@@ -142,7 +143,7 @@ async function saveLeaderboardEntry(name, score) {
   return { rank: rankIndex >= 0 ? rankIndex + 1 : null, entries: trimmed };
 }
 
-// ---------- Glowing Comet & Stardust Particle Trail ----------
+// ---------- High-Visibility Laser Comet Trail System ----------
 class CometTrailSystem {
   constructor() {
     this.history = [];
@@ -157,67 +158,102 @@ class CometTrailSystem {
   update(x, y, maxHistory, isFlapping) {
     if (maxHistory <= 0) {
       this.history = [];
+      this.sparkles = [];
       return;
     }
 
+    // Add current bird center to trail trajectory
     this.history.unshift({ x, y });
-    if (this.history.length > maxHistory * 5) {
+    if (this.history.length > maxHistory) {
       this.history.pop();
     }
 
-    // Spawn floating stardust sparkles
-    const spawnCount = isFlapping ? 3 : 1;
+    // Emit stardust particles behind the bird along the trail
+    const spawnCount = isFlapping ? 4 : 2;
     for (let i = 0; i < spawnCount; i++) {
+      const offsetPos = this.history[Math.floor(Math.random() * Math.min(5, this.history.length))] || { x, y };
       const angle = Math.random() * Math.PI * 2;
-      const speed = Math.random() * 1.5;
+      const speed = Math.random() * 2.0;
+
       this.sparkles.push({
-        x: x + (Math.random() - 0.5) * 8,
-        y: y + (Math.random() - 0.5) * 8,
-        vx: Math.cos(angle) * speed - 1.5,
+        x: offsetPos.x + (Math.random() - 0.5) * 12,
+        y: offsetPos.y + (Math.random() - 0.5) * 12,
+        vx: Math.cos(angle) * speed - 2.0,
         vy: Math.sin(angle) * speed,
-        size: Math.random() * 2 + 1,
+        size: Math.random() * 2.5 + 1.2,
         life: 1.0,
         decay: Math.random() * 0.04 + 0.02
       });
     }
 
-    // Update sparkles
+    // Update stardust physics
     for (let i = this.sparkles.length - 1; i >= 0; i--) {
       const p = this.sparkles[i];
       p.x += p.vx;
       p.y += p.vy;
       p.life -= p.decay;
-      p.size *= 0.95;
+      p.size *= 0.96;
       if (p.life <= 0) this.sparkles.splice(i, 1);
     }
   }
 
-  draw(ctx) {
-    if (this.history.length < 2 && this.sparkles.length === 0) return;
+  draw(ctx, birdRadius) {
+    if (this.history.length < 2) return;
 
     ctx.save();
-    ctx.globalCompositeOperation = "lighter"; // Additive glow pass
+    ctx.globalCompositeOperation = "lighter"; // Additive laser glow
 
-    // 1. Draw glowing ribbon tail
-    for (let i = 0; i < this.history.length - 1; i++) {
+    const total = this.history.length;
+
+    // --- PASS 1: Outer Soft Blue Glow Aura ---
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = 0; i < total - 1; i++) {
       const p1 = this.history[i];
       const p2 = this.history[i + 1];
-      const progress = 1 - i / this.history.length;
+      const ratio = 1 - i / total; // 1 at bird, 0 at tail tip
 
       ctx.beginPath();
       ctx.moveTo(p1.x, p1.y);
       ctx.lineTo(p2.x, p2.y);
-      ctx.strokeStyle = `rgba(0, 212, 255, ${progress * 0.7})`;
-      ctx.lineWidth = progress * 10;
-      ctx.lineCap = "round";
+      ctx.lineWidth = ratio * (birdRadius * 2.2);
+      ctx.strokeStyle = `rgba(0, 102, 255, ${ratio * 0.4})`;
       ctx.stroke();
     }
 
-    // 2. Draw stardust sparkles
+    // --- PASS 2: Main Intense Neon Cyan Comet Body (#00d4ff) ---
+    for (let i = 0; i < total - 1; i++) {
+      const p1 = this.history[i];
+      const p2 = this.history[i + 1];
+      const ratio = 1 - i / total;
+
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineWidth = ratio * (birdRadius * 1.3);
+      ctx.strokeStyle = `rgba(0, 212, 255, ${ratio * 0.85})`;
+      ctx.stroke();
+    }
+
+    // --- PASS 3: Ultra-Hot White Laser Core ---
+    for (let i = 0; i < total - 1; i++) {
+      const p1 = this.history[i];
+      const p2 = this.history[i + 1];
+      const ratio = 1 - i / total;
+
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineWidth = ratio * (birdRadius * 0.45);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${ratio * 0.95})`;
+      ctx.stroke();
+    }
+
+    // --- PASS 4: Stardust Sparkle Particles ---
     this.sparkles.forEach(p => {
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fillStyle = "#80e5ff";
+      ctx.fillStyle = "#80f0ff";
       ctx.globalAlpha = Math.max(0, p.life);
       ctx.fill();
     });
@@ -226,7 +262,7 @@ class CometTrailSystem {
   }
 }
 
-// ---------- Core Game ----------
+// ---------- Core Game Engine ----------
 const Game = {
   canvas: null,
   ctx: null,
@@ -661,8 +697,8 @@ const Game = {
       this._drawPipeSegment(ctx, pipe.x, bottomY, this.pipeWidth, bottomHeight, false);
     }
 
-    // 2. Draw Glowing Comet & Stardust Particle Trail
-    this.cometTrail.draw(ctx);
+    // 2. Draw High-Visibility Laser Comet Trail
+    this.cometTrail.draw(ctx, this.bird.radius);
 
     // 3. Draw Bird Sprite
     const size = this.bird.radius * 4.2;
