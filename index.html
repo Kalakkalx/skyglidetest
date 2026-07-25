@@ -42,12 +42,22 @@
   <div id="screen-game" class="screen">
     <div class="game-frame">
       <canvas id="game-canvas"></canvas>
+      
+      <!-- HUD Elements -->
       <div class="hud">
+        <!-- New High Score 1-second popup -->
+        <div id="hud-highscore-banner" class="hud-highscore-banner hidden">NEW HIGH SCORE!</div>
+        
+        <!-- Live Score -->
         <div id="hud-score">0</div>
+        
+        <!-- Rank Goal Tracker -->
+        <div id="hud-next-rank" class="hud-next-rank"></div>
       </div>
+
       <button id="btn-pause" class="pause-btn" aria-label="Pause">&#10074;&#10074;</button>
 
-      <!-- Shown only while paused, sits on top of the frozen canvas -->
+      <!-- Pause Overlay -->
       <div id="pause-overlay" class="pause-overlay hidden">
         <div class="pause-panel">
           <h2>PAUSED</h2>
@@ -74,7 +84,7 @@
           <div class="stat"><span class="stat-label">HighScore</span><span id="go-highscore" class="stat-value">0</span></div>
         </div>
 
-        <!-- Shown only when the run's score qualifies for the Top 20 -->
+        <!-- Leaderboard Prompt -->
         <div id="leaderboard-prompt" class="leaderboard-prompt hidden">
           <div class="leaderboard-prompt-text">New High Score! Enter your name (3&ndash;10 chars):</div>
           <div class="leaderboard-prompt-row">
@@ -121,9 +131,6 @@
 <audio id="sfx-tap" src="sound/sound2.mp3" preload="auto"></audio>
 <audio id="sfx-gameover" src="sound/GAMEOVER.mp3" preload="auto"></audio>
 
-<!-- Firebase (compat build — no bundler needed, matches the rest of this
-     plain-JS project). Only app + firestore are loaded; no auth SDK since
-     the leaderboard is intentionally login-free. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
