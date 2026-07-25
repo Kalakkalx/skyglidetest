@@ -2,11 +2,6 @@
 // Local storage, skins, and core game physics/rendering — everything that
 // is NOT screen/DOM management (that lives in app.js).
 
-// ---------- Trail Length Settings ----------
-const startrailsize = 25;    // Subtle sleek tail
-const mastertrailsize = 55;  // Medium long comet
-const elitetrailsize = 95;   // Extra long sweeping multi-strand tail
-
 // ---------- Local storage ----------
 const STORAGE_KEYS = {
   playerName: "playerName",
@@ -49,7 +44,7 @@ const LocalState = {
   }
 };
 
-// ---------- Skins & Smooth Pricing ----------
+// ---------- Skins & Tier Logic ----------
 function tierForSkin(level) {
   if (level >= 10) return "Elite";
   if (level >= 7) return "Master";
@@ -141,111 +136,165 @@ async function saveLeaderboardEntry(name, score) {
   return { rank: rankIndex >= 0 ? rankIndex + 1 : null, entries: trimmed };
 }
 
-// ---------- Sleek Multi-Strand Comet Trail System ----------
+// =========================================================================
+// HIGH-PERFORMANCE CINEMATIC BEZIER COMET TRAIL SYSTEM
+// =========================================================================
+const TRAIL_CONFIG = {
+  MIN_POINT_DISTANCE: 7,      // Min px bird must move before saving a new control point
+  SPARKLE_SPAWN_INTERVAL: 3,  // Spawn sparkles every N frames
+  MAX_SPARKLES: 25,           // Strict limit on active particles
+  TIER_POINTS: {
+    Basic: 0,
+    Star: 22,
+    Master: 42,
+    Elite: 68
+  }
+};
+
 class CometTrailSystem {
   constructor() {
     this.history = [];
     this.sparkles = [];
+    this.frameCounter = 0;
   }
 
   reset() {
     this.history = [];
     this.sparkles = [];
+    this.frameCounter = 0;
   }
 
-  update(x, y, rotation, birdRadius, maxHistory, isFlapping) {
-    if (maxHistory <= 0) {
+  update(x, y, rotation, birdRadius, tier) {
+    const maxPoints = TRAIL_CONFIG.TIER_POINTS[tier] || 0;
+    if (maxPoints <= 0) {
       this.history = [];
       this.sparkles = [];
       return;
     }
 
-    // Attach path slightly behind bird's tail end (no overlapping circle on body)
-    const tailX = x - Math.cos(rotation) * (birdRadius * 0.85);
-    const tailY = y - Math.sin(rotation) * (birdRadius * 0.85);
+    // Attachment point strictly at the rear feathers
+    const attachX = x - Math.cos(rotation) * (birdRadius * 0.85);
+    const attachY = y - Math.sin(rotation) * (birdRadius * 0.85);
 
-    this.history.unshift({ x: tailX, y: tailY });
-    if (this.history.length > maxHistory) {
-      this.history.pop();
+    // Distance-Based Point Recording
+    if (this.history.length === 0) {
+      this.history.unshift({ x: attachX, y: attachY });
+    } else {
+      // Keep position 0 locked to the bird's position in real-time
+      this.history[0] = { x: attachX, y: attachY };
+
+      const prevPoint = this.history[1] || this.history[0];
+      const dx = attachX - prevPoint.x;
+      const dy = attachY - prevPoint.y;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq >= TRAIL_CONFIG.MIN_POINT_DISTANCE * TRAIL_CONFIG.MIN_POINT_DISTANCE) {
+        this.history.splice(1, 0, { x: attachX, y: attachY });
+      }
     }
 
-    // Spawn sprinkles drifting along the tail path
-    const spawnCount = isFlapping ? 5 : 2;
-    for (let i = 0; i < spawnCount; i++) {
-      if (this.history.length < 3) break;
-      const targetIdx = Math.floor(Math.random() * Math.min(25, this.history.length));
-      const pos = this.history[targetIdx];
-      const angle = Math.random() * Math.PI * 2;
-      const speed = Math.random() * 1.5;
-
-      this.sparkles.push({
-        x: pos.x + (Math.random() - 0.5) * 10,
-        y: pos.y + (Math.random() - 0.5) * 10,
-        vx: Math.cos(angle) * speed - 1.2,
-        vy: Math.sin(angle) * speed,
-        size: Math.random() * 2.2 + 1.0,
-        life: 1.0,
-        decay: Math.random() * 0.03 + 0.015
-      });
+    if (this.history.length > maxPoints) {
+      this.history.length = maxPoints;
     }
 
-    // Update sprinkles
+    // Throttled Lightweight Sparkle Emitter
+    this.frameCounter++;
+    if (this.frameCounter % TRAIL_CONFIG.SPARKLE_SPAWN_INTERVAL === 0 && this.history.length > 4) {
+      if (this.sparkles.length < TRAIL_CONFIG.MAX_SPARKLES) {
+        const randIdx = Math.floor(Math.random() * Math.min(18, this.history.length));
+        const p = this.history[randIdx];
+        this.sparkles.push({
+          x: p.x + (Math.random() - 0.5) * 8,
+          y: p.y + (Math.random() - 0.5) * 8,
+          vx: (Math.random() - 0.5) * 1.2 - 1.0,
+          vy: (Math.random() - 0.5) * 1.2,
+          size: Math.random() * 2.0 + 1.0,
+          alpha: 1.0,
+          decay: Math.random() * 0.04 + 0.02
+        });
+      }
+    }
+
+    // Update particles
     for (let i = this.sparkles.length - 1; i >= 0; i--) {
-      const p = this.sparkles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.life -= p.decay;
-      p.size *= 0.97;
-      if (p.life <= 0) this.sparkles.splice(i, 1);
+      const s = this.sparkles[i];
+      s.x += s.vx;
+      s.y += s.vy;
+      s.alpha -= s.decay;
+      if (s.alpha <= 0) {
+        this.sparkles.splice(i, 1);
+      }
     }
   }
 
   draw(ctx, birdRadius) {
-    if (this.history.length < 2) return;
+    if (this.history.length < 3) return;
+
+    const head = this.history[0];
+    const tail = this.history[this.history.length - 1];
 
     ctx.save();
-    ctx.globalCompositeOperation = "lighter"; // Additive laser cyan glow
-
-    const total = this.history.length;
-
-    // Helper to draw a single sleek tapered ribbon strand
-    const drawStrand = (offsetY, strokeStyle, baseWidth) => {
-      ctx.beginPath();
-      for (let i = 0; i < total - 1; i++) {
-        const p1 = this.history[i];
-        const p2 = this.history[i + 1];
-        const ratio = 1 - i / total; // Tapers down smoothly to tip
-
-        // Slight wavy offset for multi-strand look
-        const shiftY = Math.sin(i * 0.3) * offsetY * ratio;
-
-        ctx.moveTo(p1.x, p1.y + shiftY);
-        ctx.lineTo(p2.x, p2.y + shiftY);
-        ctx.lineWidth = ratio * baseWidth;
-        ctx.strokeStyle = strokeStyle;
-        ctx.stroke();
-      }
-    };
-
-    // --- Strand 1: Upper Sleek Cyan Ribbon ---
+    ctx.globalCompositeOperation = "lighter";
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    drawStrand(-3, "rgba(0, 212, 255, 0.6)", birdRadius * 0.30);
 
-    // --- Strand 2: Center Intense Laser Core Ribbon ---
-    drawStrand(0, "rgba(180, 245, 255, 0.95)", birdRadius * 0.42);
-
-    // --- Strand 3: Lower Sleek Cyan Ribbon ---
-    drawStrand(3, "rgba(0, 212, 255, 0.6)", birdRadius * 0.30);
-
-    // --- Sprinkles / Sparkles ---
-    this.sparkles.forEach(p => {
+    // Helper: Trace a single continuous Quadratic Bézier Curve Path
+    const traceSplinePath = () => {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.moveTo(head.x, head.y);
+      for (let i = 1; i < this.history.length - 1; i++) {
+        const pCurrent = this.history[i];
+        const pNext = this.history[i + 1];
+        const midX = (pCurrent.x + pNext.x) / 2;
+        const midY = (pCurrent.y + pNext.y) / 2;
+        ctx.quadraticCurveTo(pCurrent.x, pCurrent.y, midX, midY);
+      }
+      ctx.lineTo(tail.x, tail.y);
+    };
+
+    // Smooth Taper Gradients along the full length of the trail
+    const gradGlow = ctx.createLinearGradient(head.x, head.y, tail.x, tail.y);
+    gradGlow.addColorStop(0, "rgba(0, 212, 255, 0.65)");
+    gradGlow.addColorStop(0.5, "rgba(0, 150, 255, 0.25)");
+    gradGlow.addColorStop(1, "rgba(0, 50, 200, 0)");
+
+    const gradRibbon = ctx.createLinearGradient(head.x, head.y, tail.x, tail.y);
+    gradRibbon.addColorStop(0, "rgba(0, 212, 255, 0.95)");
+    gradRibbon.addColorStop(0.5, "rgba(0, 212, 255, 0.45)");
+    gradRibbon.addColorStop(1, "rgba(0, 180, 255, 0)");
+
+    const gradCore = ctx.createLinearGradient(head.x, head.y, tail.x, tail.y);
+    gradCore.addColorStop(0, "rgba(255, 255, 255, 1.0)");
+    gradCore.addColorStop(0.35, "rgba(200, 245, 255, 0.7)");
+    gradCore.addColorStop(1, "rgba(0, 212, 255, 0)");
+
+    // PASS 1: Broad Soft Cyan Ambient Glow
+    traceSplinePath();
+    ctx.lineWidth = birdRadius * 0.95;
+    ctx.strokeStyle = gradGlow;
+    ctx.stroke();
+
+    // PASS 2: Main Neon Cyan Energy Ribbon
+    traceSplinePath();
+    ctx.lineWidth = birdRadius * 0.48;
+    ctx.strokeStyle = gradRibbon;
+    ctx.stroke();
+
+    // PASS 3: Hot White Laser Core
+    traceSplinePath();
+    ctx.lineWidth = birdRadius * 0.20;
+    ctx.strokeStyle = gradCore;
+    ctx.stroke();
+
+    // PASS 4: Lightweight Sparkle Particles
+    for (let i = 0; i < this.sparkles.length; i++) {
+      const s = this.sparkles[i];
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
       ctx.fillStyle = "#80f0ff";
-      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.globalAlpha = Math.max(0, s.alpha);
       ctx.fill();
-    });
+    }
 
     ctx.restore();
   }
@@ -431,7 +480,6 @@ const Game = {
   flap() {
     if (!this.running || this.paused || this.countingDown || this.dying) return;
     this.bird.vy = this.flapStrength;
-    this._justFlapped = true;
 
     const tap = document.getElementById("sfx-tap");
     if (tap) {
@@ -515,15 +563,9 @@ const Game = {
       this.bird.rotation = Math.min(maxDownAngle, this.bird.rotation + 0.04 * dt);
     }
 
-    // Motion Trail Tracking per Tier
+    // Motion Trail Tracking
     const tier = tierForSkin(this.currentSkinLevel);
-    let maxTrailLength = 0;
-    if (tier === "Star") maxTrailLength = startrailsize;
-    else if (tier === "Master") maxTrailLength = mastertrailsize;
-    else if (tier === "Elite") maxTrailLength = elitetrailsize;
-
-    this.cometTrail.update(this.bird.x, this.bird.y, this.bird.rotation, this.bird.radius, maxTrailLength, this._justFlapped);
-    this._justFlapped = false;
+    this.cometTrail.update(this.bird.x, this.bird.y, this.bird.rotation, this.bird.radius, tier);
 
     // Update Particles
     for (let i = this.particles.length - 1; i >= 0; i--) {
@@ -534,13 +576,13 @@ const Game = {
       if (p.life <= 0) this.particles.splice(i, 1);
     }
 
-    // Ground/Ceiling Boundary
+    // Boundaries
     if (this.bird.y + this.bird.radius >= this.height || this.bird.y - this.bird.radius <= 0) {
       this._triggerCollision();
       return;
     }
 
-    // Pipe Updates
+    // Pipes
     for (const pipe of this.pipes) {
       pipe.x -= this.speed * dt;
     }
@@ -553,7 +595,7 @@ const Game = {
       this._spawnPipe(rightmost.x + this._currentPipeGapX());
     }
 
-    // Pipe Collisions
+    // Collision Checks
     for (const pipe of this.pipes) {
       const withinX = this.bird.x + this.bird.radius > pipe.x &&
                        this.bird.x - this.bird.radius < pipe.x + this.pipeWidth;
@@ -595,28 +637,19 @@ const Game = {
   },
 
   _spawnGoldenSparkles(x, y) {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 6; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 1.5 + Math.random() * 2.5;
+      const speed = 1.5 + Math.random() * 2.0;
       this.particles.push({
-        x: x + (Math.random() - 0.5) * 15,
-        y: y + (Math.random() - 0.5) * 15,
+        x: x + (Math.random() - 0.5) * 12,
+        y: y + (Math.random() - 0.5) * 12,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed - 1,
         life: 1.0,
         type: "star",
-        size: 3 + Math.random() * 4
+        size: 3 + Math.random() * 3
       });
     }
-    this.particles.push({
-      x: x + 10,
-      y: y - 10,
-      vx: 0.5,
-      vy: -1.2,
-      life: 1.0,
-      type: "text",
-      text: "+1"
-    });
   },
 
   _gameOver() {
@@ -686,10 +719,10 @@ const Game = {
       this._drawPipeSegment(ctx, pipe.x, bottomY, this.pipeWidth, bottomHeight, false);
     }
 
-    // 2. Draw Sleek Multi-Strand Comet Trail Behind Bird
+    // 2. Draw Cinematic Bézier Comet Trail (Behind Bird)
     this.cometTrail.draw(ctx, this.bird.radius);
 
-    // 3. Draw Bird Sprite (Clean, no background circle)
+    // 3. Draw Bird Sprite
     const size = this.bird.radius * 4.2;
     ctx.save();
     ctx.translate(this.bird.x, this.bird.y);
@@ -705,7 +738,7 @@ const Game = {
     }
     ctx.restore();
 
-    // 4. Draw Score Sparkles & Floating Text
+    // 4. Draw Score Sparkles
     for (const p of this.particles) {
       ctx.save();
       ctx.globalAlpha = p.life;
@@ -716,12 +749,6 @@ const Game = {
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
-      } else if (p.type === "text") {
-        ctx.font = "bold 18px sans-serif";
-        ctx.fillStyle = "#ffd700";
-        ctx.shadowColor = "#000000";
-        ctx.shadowBlur = 4;
-        ctx.fillText(p.text, p.x, p.y);
       }
       ctx.restore();
     }
