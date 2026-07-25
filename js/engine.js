@@ -2,6 +2,11 @@
 // Local storage, skins, and core game physics/rendering — everything that
 // is NOT screen/DOM management (that lives in app.js).
 
+// ---------- Trail Size Settings (Editable) ----------
+const startrailsize = 2;
+const mastertrailsize = 3;
+const elitetrailsize = 4;
+
 // ---------- Local storage (all game state lives here) ----------
 const STORAGE_KEYS = {
   playerName: "playerName",
@@ -149,13 +154,19 @@ const Game = {
 
   running: false,
   paused: false,
+  dying: false,
   countingDown: false,
-  _countdownInterval: null, // Track timer ID to clear when resetting/pausing
+  _countdownInterval: null,
   score: 0,
   coinsThisRun: 0,
 
-  bird: { x: 0, y: 0, vy: 0, radius: 0 },
+  bird: { x: 0, y: 0, vy: 0, radius: 0, rotation: 0 },
   pipes: [],
+  
+  // Motion trail and particle systems
+  trail: [],
+  particles: [],
+  currentSkinLevel: 1,
 
   _ratios: {
     birdRadius: 0.0519,
@@ -169,8 +180,8 @@ const Game = {
   },
 
   speedMultiplierMin: 1.4,
-  speedMultiplierMax: 4.0,       // Max 4.0x speed cap
-  speedMultiplierStep: 0.25,     // Increases smoothly every 5 points
+  speedMultiplierMax: 4.0,
+  speedMultiplierStep: 0.25,
   speedMultiplierStepScore: 5,
 
   speed: 0,
@@ -192,6 +203,12 @@ const Game = {
     this.ctx = canvas.getContext("2d");
     this.resize();
     window.addEventListener("resize", () => this.resize());
+    
+    // Pre-adjust SFX volume to 70%
+    const s1 = document.getElementById("sfx-point");
+    const s2 = document.getElementById("sfx-tap");
+    if (s1) s1.volume = 0.7;
+    if (s2) s2.volume = 0.7;
   },
 
   resize() {
@@ -222,13 +239,13 @@ const Game = {
   },
 
   loadSkin(skinLevel) {
+    this.currentSkinLevel = skinLevel;
     const img = new Image();
     img.src = `images/Level${skinLevel}.png`;
     this.skinImage = img;
   },
 
   start(skinLevel) {
-    // Clear any lingering countdown interval if restarting mid-countdown
     if (this._countdownInterval) {
       clearInterval(this._countdownInterval);
       this._countdownInterval = null;
@@ -241,16 +258,20 @@ const Game = {
     this.coinsThisRun = 0;
     this.speed = this._unitSpeed * this.speedMultiplierMin;
     this.pipes = [];
+    this.trail = [];
+    this.particles = [];
 
     this.bird = {
       x: this.width * 0.25,
       y: this.height / 2,
       vy: 0,
-      radius: this.height * this._ratios.birdRadius
+      radius: this.height * this._ratios.birdRadius,
+      rotation: 0
     };
 
     this.running = true;
     this.paused = false;
+    this.dying = false;
     this.countingDown = false;
     this._spawnInitialPipes();
     this._graceMs = 500;
@@ -259,9 +280,8 @@ const Game = {
   },
 
   togglePause() {
-    if (!this.running) return false;
+    if (!this.running || this.dying) return false;
 
-    // If currently in a countdown, cancel it and re-pause
     if (this.countingDown) {
       if (this._countdownInterval) {
         clearInterval(this._countdownInterval);
@@ -280,7 +300,7 @@ const Game = {
   },
 
   unpauseWithCountdown(onTick, onComplete) {
-    if (!this.paused || this.countingDown) return;
+    if (!this.paused || this.countingDown || this.dying) return;
 
     this.countingDown = true;
     let count = 3;
@@ -297,7 +317,7 @@ const Game = {
         this._countdownInterval = null;
         this.countingDown = false;
         this.paused = false;
-        this._lastTimestamp = null; // Prevents bird from teleporting after unpause
+        this._lastTimestamp = null;
         onComplete();
         requestAnimationFrame((t) => this._loop(t));
       }
@@ -305,11 +325,12 @@ const Game = {
   },
 
   flap() {
-    if (!this.running || this.paused || this.countingDown) return;
+    if (!this.running || this.paused || this.countingDown || this.dying) return;
     this.bird.vy = this.flapStrength;
 
     const tap = document.getElementById("sfx-tap");
     if (tap) {
+      tap.volume = 0.7;
       tap.currentTime = 0;
       tap.play().catch(() => {});
     }
@@ -358,6 +379,21 @@ const Game = {
   },
 
   _update(dt, elapsedMs) {
+    // Handling Hit/Dying Animation
+    if (this.dying) {
+      this.bird.vy += this.gravity * 1.8 * dt;
+      this.bird.y += this.bird.vy * dt;
+      
+      // Pitch down sharply when tumbling
+      this.bird.rotation = Math.min(Math.PI / 2, this.bird.rotation + 0.12 * dt);
+
+      if (this.bird.y + this.bird.radius >= this.height) {
+        this.bird.y = this.height - this.bird.radius;
+        this._gameOver();
+      }
+      return;
+    }
+
     this._updateDifficulty(dt);
 
     if (this._graceMs > 0) {
@@ -369,11 +405,45 @@ const Game = {
     }
     this.bird.y += this.bird.vy * dt;
 
+    // Gentle Flap Pitching
+    const maxUpAngle = -0.32; // ~-18 degrees
+    const maxDownAngle = 1.2;  // ~68 degrees
+    if (this.bird.vy < 0) {
+      this.bird.rotation = Math.max(maxUpAngle, this.bird.vy * 22);
+    } else {
+      this.bird.rotation = Math.min(maxDownAngle, this.bird.rotation + 0.04 * dt);
+    }
+
+    // Motion Trail Tracking
+    const tier = tierForSkin(this.currentSkinLevel);
+    let maxTrailLength = 0;
+    if (tier === "Star") maxTrailLength = startrailsize;
+    else if (tier === "Master") maxTrailLength = mastertrailsize;
+    else if (tier === "Elite") maxTrailLength = elitetrailsize;
+
+    if (maxTrailLength > 0) {
+      this.trail.unshift({ x: this.bird.x, y: this.bird.y, rotation: this.bird.rotation });
+      if (this.trail.length > maxTrailLength) this.trail.pop();
+    } else {
+      this.trail = [];
+    }
+
+    // Update Sparkle Particles
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= 0.03 * dt;
+      if (p.life <= 0) this.particles.splice(i, 1);
+    }
+
+    // Ground/Ceiling Boundary Hit
     if (this.bird.y + this.bird.radius >= this.height || this.bird.y - this.bird.radius <= 0) {
-      this._gameOver();
+      this._triggerCollision();
       return;
     }
 
+    // Pipe Updates
     for (const pipe of this.pipes) {
       pipe.x -= this.speed * dt;
     }
@@ -386,6 +456,7 @@ const Game = {
       this._spawnPipe(rightmost.x + this._currentPipeGapX());
     }
 
+    // Pipe Collision Check
     for (const pipe of this.pipes) {
       const withinX = this.bird.x + this.bird.radius > pipe.x &&
                        this.bird.x - this.bird.radius < pipe.x + this.pipeWidth;
@@ -395,7 +466,7 @@ const Game = {
                          this.bird.y + this.bird.radius < bottomEdge;
 
       if (withinX && !withinGap) {
-        this._gameOver();
+        this._triggerCollision();
         return;
       }
 
@@ -406,12 +477,21 @@ const Game = {
     }
   },
 
+  _triggerCollision() {
+    this.dying = true;
+    this.bird.vy = Math.min(-this.flapStrength * 0.4, -0.003 * this.height);
+  },
+
   _onScore() {
     this.score += 1;
     this.coinsThisRun += 1;
 
+    // Spawn Golden Sparkles + Floating Text
+    this._spawnGoldenSparkles(this.bird.x, this.bird.y);
+
     const point = document.getElementById("sfx-point");
     if (point) {
+      point.volume = 0.7;
       point.currentTime = 0;
       point.play().catch(() => {});
     }
@@ -419,8 +499,36 @@ const Game = {
     if (this.onScoreUpdate) this.onScoreUpdate(this.score);
   },
 
+  _spawnGoldenSparkles(x, y) {
+    // Golden star sparkles
+    for (let i = 0; i < 8; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 2.5;
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 15,
+        y: y + (Math.random() - 0.5) * 15,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 1,
+        life: 1.0,
+        type: "star",
+        size: 3 + Math.random() * 4
+      });
+    }
+    // Floating "+1" text
+    this.particles.push({
+      x: x + 10,
+      y: y - 10,
+      vx: 0.5,
+      vy: -1.2,
+      life: 1.0,
+      type: "text",
+      text: "+1"
+    });
+  },
+
   _gameOver() {
     this.running = false;
+    this.dying = false;
 
     if (this._countdownInterval) {
       clearInterval(this._countdownInterval);
@@ -475,6 +583,7 @@ const Game = {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
 
+    // Pipes
     for (const pipe of this.pipes) {
       const topHeight = pipe.gapCenter - this.pipeGapY / 2;
       const bottomY = pipe.gapCenter + this.pipeGapY / 2;
@@ -484,14 +593,65 @@ const Game = {
       this._drawPipeSegment(ctx, pipe.x, bottomY, this.pipeWidth, bottomHeight, false);
     }
 
+    // Golden Motion Trail for Tiered Skins
+    const size = this.bird.radius * 4.2;
+    if (this.trail.length > 0) {
+      for (let i = 0; i < this.trail.length; i++) {
+        const t = this.trail[i];
+        const alpha = ((this.trail.length - i) / this.trail.length) * 0.35;
+        ctx.save();
+        ctx.translate(t.x, t.y);
+        ctx.rotate(t.rotation);
+        ctx.globalAlpha = alpha;
+
+        if (this.skinImage && this.skinImage.complete) {
+          ctx.drawImage(this.skinImage, -size / 2, -size / 2, size, size);
+        }
+        
+        // Golden overlay glow on trail
+        ctx.fillStyle = "rgba(255, 215, 0, 0.3)";
+        ctx.beginPath();
+        ctx.arc(0, 0, this.bird.radius * 1.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      }
+    }
+
+    // Render Bird with Rotation
+    ctx.save();
+    ctx.translate(this.bird.x, this.bird.y);
+    ctx.rotate(this.bird.rotation);
+
     if (this.skinImage && this.skinImage.complete) {
-      const size = this.bird.radius * 4.2;
-      ctx.drawImage(this.skinImage, this.bird.x - size / 2, this.bird.y - size / 2, size, size);
+      ctx.drawImage(this.skinImage, -size / 2, -size / 2, size, size);
     } else {
       ctx.fillStyle = "#ffcc00";
       ctx.beginPath();
-      ctx.arc(this.bird.x, this.bird.y, this.bird.radius, 0, Math.PI * 2);
+      ctx.arc(0, 0, this.bird.radius, 0, Math.PI * 2);
       ctx.fill();
+    }
+    ctx.restore();
+
+    // Render Sparkles and Floating Text
+    for (const p of this.particles) {
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      if (p.type === "star") {
+        ctx.fillStyle = "#ffe600";
+        ctx.shadowColor = "#ffaa00";
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.type === "text") {
+        ctx.font = "bold 18px sans-serif";
+        ctx.fillStyle = "#ffd700";
+        ctx.shadowColor = "#000000";
+        ctx.shadowBlur = 4;
+        ctx.fillText(p.text, p.x, p.y);
+      }
+      ctx.restore();
     }
   }
 };
