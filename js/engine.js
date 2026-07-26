@@ -1,5 +1,5 @@
 // =========================================================================
-// CINEMATIC TAPERED POLYGON & VELOCITY-REACTIVE COMET TRAIL SYSTEM
+// CINEMATIC TAPERED POLYGON & VELOCITY-REACTIVE COMET TRAIL SYSTEM 
 // =========================================================================
 const TRAIL_CONFIG = {
   MIN_POINT_DISTANCE: 6,       // Minimum px bird moves before dropping a point
@@ -10,7 +10,7 @@ const TRAIL_CONFIG = {
     Star:   { maxPoints: 24, baseLengthMult: 1.2, baseWidthMult: 0.45 },
     Master: { maxPoints: 48, baseLengthMult: 2.0, baseWidthMult: 0.70 },
     Elite:  { maxPoints: 75, baseLengthMult: 3.2, baseWidthMult: 0.95 }
-  }
+  } 
 };
 
 class CometTrailSystem {
